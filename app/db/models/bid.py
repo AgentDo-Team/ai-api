@@ -6,12 +6,12 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
-    Index,
     Integer,
     Text,
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
 
@@ -45,7 +45,6 @@ class Chunk(SQLModel, table=True):
     __tablename__ = "chunks"
     __table_args__ = (
         UniqueConstraint("bid_notice_id", "chunk_index", name="uq_chunks_notice_index"),
-        Index("ix_chunks_notice_section", "bid_notice_id", "section_type"),
     )
 
     id: int | None = Field(
@@ -62,9 +61,13 @@ class Chunk(SQLModel, table=True):
     chunk_index: int = Field(
         sa_column=Column(Integer, nullable=False)
     )  # 문서에서 몇 번째 청크인지
-    section_type: str | None = Field(
-        default=None, max_length=30
-    )  # 메타데이터 (Enum)
+    lexical_weights: dict[str, float] | None = Field(
+        default=None, sa_column=Column(JSONB)
+    )  # 희소 벡터
+    page_no: int | None = Field(default=None, sa_column=Column(Integer))  # 문서 번호
+    chunk_metadata: dict | None = Field(
+        default=None, sa_column=Column("metadata", JSONB)
+    )  # 메타데이터 (Enum) - 어떤 내용에 대한 청크인지
     token_count: int | None = Field(
         default=None, sa_column=Column(Integer)
     )  # 토큰 수 (디버깅용)
