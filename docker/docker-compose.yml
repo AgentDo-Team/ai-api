@@ -1,0 +1,23 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16 # PostgreSQL + pgvector
+    container_name: ai-api-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: edu
+      POSTGRES_PASSWORD: 1234
+      POSTGRES_DB: edudb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # 컨테이너 최초 기동 시 1회 실행되는 초기화 스크립트 (pgvector 확장 생성)
+      - ./initdb:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edu -d edudb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
