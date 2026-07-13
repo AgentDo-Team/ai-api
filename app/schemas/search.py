@@ -75,6 +75,7 @@ class BidSearchResultItem(BaseModel):
 class BidSearchResponse(BaseModel):
     """공고 검색 결과. ApiResponse.data 에 담아 반환한다."""
 
+    search_set_id: int = Field(description="이번 검색으로 생성된 검색 세트(채팅방) ID")
     hard_filtered_count: int = Field(description="1차 하드 필터링 통과 공고 수")
     items: list[BidSearchResultItem] = Field(
         default_factory=list, description="최종(소프트 필터링까지 반영) 공고 목록"
