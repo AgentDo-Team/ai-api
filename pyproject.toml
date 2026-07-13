@@ -6,10 +6,19 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "asyncpg>=0.31.0",           # PostgreSQL 비동기 드라이버 (SQLAlchemy async 엔진이 사용)
+    "bcrypt>=5.0.0",
     "fastapi>=0.139.0",          # 웹 API 프레임워크
     "greenlet>=3.5.3",           # SQLAlchemy async 실행에 필요한 런타임 의존성
     "pgvector>=0.5.0",           # pgvector 확장 연동 (Vector 컬럼 타입 제공)
     "pydantic-settings>=2.14.2", # .env 환경변수 로딩/설정 관리 (Settings)
+    "pydantic[email]>=2.13.4",
+    "pyjwt>=2.13.0",
     "sqlmodel>=0.0.39",          # ORM + Pydantic 모델 (SQLAlchemy 기반, DB 모델 정의)
     "uvicorn[standard]>=0.51.0", # ASGI 서버 (FastAPI 앱 구동)
+]
+
+[dependency-groups]
+dev = [
+    "aiosqlite>=0.22.1",
+    "httpx>=0.28.1",
 ]

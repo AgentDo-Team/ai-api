@@ -8,8 +8,10 @@ from app.db.models.analysis import AnalysisResult, ChatMessage
 from app.db.models.bid import BidNotice, Chunk
 from app.db.models.company import Company, CompanyProfile, CompanyProject
 from app.db.models.search import DomainCode, HardFilter, SearchSet
+from app.db.models.user import User
 
 __all__ = [
+    "User",
     "Company",
     "CompanyProfile",
     "CompanyProject",
