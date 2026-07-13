@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     # SQL 로그 출력 여부
     db_echo: bool = False
 
+    # bge-m3 임베딩 서버 주소 (별도 프로세스, 기본 8001 포트)
+    embedding_service_url: str = "http://localhost:8001"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

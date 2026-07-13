@@ -21,6 +21,7 @@ from app.schemas.search import (
     BidSearchResultItem,
     HardFilterCondition,
 )
+from app.services import embedding_service
 
 # 채팅방 제목 기본값 (자유형식 메시지가 없을 때)
 _DEFAULT_SEARCH_TITLE = "공고 검색"
@@ -119,6 +120,9 @@ async def search_bid_notices(
     쿼리 임베딩에도 쓰인다. company_id도 이후 프로필/프로젝트 조회에 사용한다.
     """
     search_set = await create_search_session(session, request)
+
+    # 지연 임베딩: 아직 임베딩 안 된 자사 프로필/프로젝트를 이 시점에 채운다.
+    await embedding_service.ensure_company_embedded(session, request.company_id)
 
     notices = await hard_filter_notices(session, request.filters)
     items = [
