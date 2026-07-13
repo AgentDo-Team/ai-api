@@ -38,7 +38,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```text
 install: uv sync
 dev: docker compose -f docker/docker-compose.yml up -d && uv run python -m app.db.init_db && uv run uvicorn main:app --reload
-test: uv run pytest   # DB/Ollama 없이 도는 단위 테스트
+test: uv run pytest   # DB 없이 도는 단위 테스트
 build:  (해당 없음 — 위 Tech Stack의 Build 항목 참고)
 ```
 
