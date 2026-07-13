@@ -24,6 +24,8 @@ VECTOR_INDEXES = (
     "ON chunks USING hnsw (embedding vector_cosine_ops)",
     "CREATE INDEX IF NOT EXISTS idx_company_projects_embedding "
     "ON company_projects USING hnsw (embedding vector_cosine_ops)",
+    "CREATE INDEX IF NOT EXISTS idx_company_profiles_embedding "
+    "ON company_profiles USING hnsw (embedding vector_cosine_ops)",
 )
 
 
