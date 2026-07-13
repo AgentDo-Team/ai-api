@@ -10,6 +10,7 @@ from sqlalchemy import (
     Text,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
 
@@ -55,6 +56,13 @@ class CompanyProfile(SQLModel, table=True):
     )  # 강점과 차별점
     credit_rating: str | None = Field(default=None, max_length=50)  # 신용평가등급
     sp_grade: str | None = Field(default=None, max_length=50)  # SP등급
+    # 소프트 필터링(하이브리드)용 벡터. 전송 시점에 지연 임베딩 (NULL = 미임베딩)
+    lexical_weights: dict[str, float] | None = Field(
+        default=None, sa_column=Column(JSONB)
+    )  # 희소 벡터 (sparse)
+    embedding: list[float] | None = Field(
+        default=None, sa_column=Column(Vector(1024))
+    )  # 밀집 벡터 (dense), NULL = 미임베딩
     updated_at: datetime | None = Field(
         default=None,
         sa_column=Column(
@@ -91,9 +99,13 @@ class CompanyProject(SQLModel, table=True):
     performance: str | None = Field(
         default=None, sa_column=Column(Text)
     )  # 실적 결과 (정량적 성과)
+    # 소프트 필터링(하이브리드)용 벡터. 전송 시점에 지연 임베딩 (NULL = 미임베딩)
+    lexical_weights: dict[str, float] | None = Field(
+        default=None, sa_column=Column(JSONB)
+    )  # 희소 벡터 (sparse)
     embedding: list[float] | None = Field(
         default=None, sa_column=Column(Vector(1024))
-    )  # NULL = 미임베딩
+    )  # 밀집 벡터 (dense), NULL = 미임베딩
     created_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), server_default=func.now(), nullable=False),
