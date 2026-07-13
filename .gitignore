@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Notion 정리본 (로컬 전용, 노션에 붙여넣기용)
+docs/notion/
