@@ -24,7 +24,19 @@ uv sync
 cp .env.example .env
 ```
 
-### 4. 데이터베이스 실행 + 스키마 생성
+### 4. 임베딩 모델 준비 (Ollama, 선택)
+
+현재 CRUD 단계에서는 임베딩하지 않으므로 Ollama 없이도 API가 동작합니다.
+프로필/프로젝트의 `embedding` 컬럼은 NULL(응답의 `embedded` 가 `false`)로 남고, 이후 추천 단계에서 채웁니다.
+
+추천 단계에서 쓸 **BGE-M3**(1024차원)를 미리 받아두려면:
+
+```bash
+ollama pull bge-m3
+ollama list | grep bge-m3   # 확인
+```
+
+### 5. 데이터베이스 실행 + 스키마 생성
 
 PostgreSQL(+pgvector)을 도커로 띄웁니다. Docker Desktop이 켜져 있어야 합니다.
 
@@ -44,7 +56,7 @@ uv run python -m app.db.init_db
 docker exec ai-api-postgres psql -U edu -d edudb -c "\dt"
 ```
 
-### 5. 서버 실행
+### 6. 서버 실행
 
 ```bash
 uv run uvicorn main:app --reload
@@ -54,6 +66,30 @@ uv run uvicorn main:app --reload
 
 - API: http://127.0.0.1:8000
 - Swagger 문서: http://127.0.0.1:8000/docs
+
+## 테스트
+
+DB 없이 도는 단위 테스트입니다. (리포지토리를 가짜로 갈아끼웁니다)
+
+```bash
+uv run pytest
+```
+
+## API
+
+전체 명세와 요청 예시는 Swagger(http://127.0.0.1:8000/docs)에서 확인하세요.
+
+| 메서드 | 경로 | 설명 |
+| --- | --- | --- |
+| POST / GET | `/api/companies` | 회사 등록 / 목록 조회 |
+| GET / PATCH / DELETE | `/api/companies/{company_id}` | 회사 조회 / 수정 / 삭제 (하위 리소스 CASCADE 삭제) |
+| POST / GET / PATCH / DELETE | `/api/companies/{company_id}/profile` | 회사 프로필 CRUD (회사당 1건) |
+| POST / GET | `/api/companies/{company_id}/projects` | 프로젝트 등록 / 목록 조회 |
+| GET / PATCH / DELETE | `/api/companies/{company_id}/projects/{project_id}` | 프로젝트 조회 / 수정 / 삭제 |
+
+모든 응답은 `ApiResponse`(`success` / `message` / `data`) 로 감싸집니다.
+프로필·프로젝트 응답에는 1024개 float 벡터 대신 임베딩 여부만 `embedded` 플래그로 내려갑니다.
+CRUD 는 임베딩하지 않으므로 지금은 항상 `false` 이며, 추천 단계에서 채워집니다.
 
 ## 데이터베이스 관리
 
