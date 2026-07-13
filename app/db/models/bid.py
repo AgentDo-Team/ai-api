@@ -35,6 +35,16 @@ class BidNotice(SQLModel, table=True):  # 입찰공고
         default=None, max_length=1000
     )  # 제안요청서 다운로드 url
     parse_status: str | None = Field(default=None, max_length=20)  # 파싱 상태 (Enum)
+    # 하드 필터링용 정형 메타데이터 (나라장터 API가 공고 단위로 제공)
+    procurement_clsfc_no: str | None = Field(
+        default=None, max_length=50
+    )  # 공공조달 분류번호 (도메인 코드, 예: 81111513) - pubPrcrmntClsfcNo
+    procurement_clsfc_nm: str | None = Field(
+        default=None, max_length=200
+    )  # 공공조달 분류명 (예: 클라우드서비스) - pubPrcrmntClsfcNm
+    joint_venture_method: str | None = Field(
+        default=None, max_length=50
+    )  # 공동수급 방식명 (값 존재 = 공동수급 가능) - cmmnSpldmdMethdNm
     created_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), server_default=func.now(), nullable=False),
