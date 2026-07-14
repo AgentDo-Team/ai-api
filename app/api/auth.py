@@ -1,4 +1,4 @@
-"""회원가입 / 로그인 API 라우터."""
+"""회원가입 / 로그인 API 라우터 (계정 = 회사)."""
 
 import jwt
 from fastapi import APIRouter, Depends
@@ -7,16 +7,16 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.common.exceptions import AppException
 from app.core.security import decode_access_token
-from app.db.models.user import User
+from app.db.models.company import Company
 from app.db.session import get_session
 from app.schemas.auth import (
+    AccountResponse,
     LoginRequest,
     SignupRequest,
     TokenResponse,
-    UserResponse,
 )
 from app.schemas.response import ApiResponse
-from app.services import auth_service
+from app.services import auth_service, profile_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -28,10 +28,11 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 async def signup(
     data: SignupRequest,
     session: AsyncSession = Depends(get_session),
-) -> ApiResponse[UserResponse]:
-    user = await auth_service.signup(session, data)
+) -> ApiResponse[AccountResponse]:
+    company = await auth_service.signup(session, data)
+    # 방금 가입한 계정은 아직 프로필이 없으므로 has_profile=False
     return ApiResponse.ok(
-        data=UserResponse.model_validate(user, from_attributes=True),
+        data=AccountResponse.model_validate(company, from_attributes=True),
         message="회원가입이 완료되었습니다.",
     )
 
@@ -48,32 +49,38 @@ async def login(
     )
 
 
-async def get_current_user(
+async def get_current_account(
     token: str = Depends(oauth2_scheme),
     session: AsyncSession = Depends(get_session),
-) -> User:
-    """Bearer 토큰을 검증하고 현재 로그인한 사용자를 반환하는 의존성."""
+) -> Company:
+    """Bearer 토큰을 검증하고 현재 로그인한 계정(회사)을 반환하는 의존성."""
     credentials_error = AppException("인증 정보가 유효하지 않습니다.", status_code=401)
     try:
         payload = decode_access_token(token)
-        user_id = payload.get("sub")
+        account_id = payload.get("sub")
     except jwt.PyJWTError as exc:
         raise credentials_error from exc
 
-    if user_id is None:
+    if account_id is None:
         raise credentials_error
 
-    user = await session.get(User, int(user_id))
-    if user is None:
+    company = await session.get(Company, int(account_id))
+    if company is None:
         raise credentials_error
-    return user
+    return company
 
 
 @router.get("/me")
 async def me(
-    current_user: User = Depends(get_current_user),
-) -> ApiResponse[UserResponse]:
-    """현재 로그인한 사용자 정보 조회 (인증 확인용)."""
-    return ApiResponse.ok(
-        data=UserResponse.model_validate(current_user, from_attributes=True),
+    current_account: Company = Depends(get_current_account),
+    session: AsyncSession = Depends(get_session),
+) -> ApiResponse[AccountResponse]:
+    """현재 로그인한 계정 정보 + 프로필 작성 여부(has_profile).
+
+    프론트는 has_profile 로 온보딩(입력폼) 화면과 채팅 화면을 분기한다.
+    """
+    account = AccountResponse.model_validate(current_account, from_attributes=True)
+    account.has_profile = await profile_service.has_profile(
+        session, current_account.id
     )
+    return ApiResponse.ok(data=account)

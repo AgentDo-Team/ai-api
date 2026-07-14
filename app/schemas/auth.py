@@ -17,12 +17,19 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class UserResponse(BaseModel):
-    """사용자 정보 응답 (비밀번호 해시는 노출하지 않는다)."""
+class AccountResponse(BaseModel):
+    """계정(=회사) 정보 응답 (비밀번호 해시는 노출하지 않는다).
+
+    has_profile: 자사 프로필(입력폼)을 작성했는지 여부.
+    프론트는 이 값으로 온보딩 화면 vs 채팅 화면을 분기한다.
+    """
 
     id: int
     email: EmailStr
+    name: str | None = None
+    contact_name: str | None = None
     created_at: datetime
+    has_profile: bool = False
 
 
 class TokenResponse(BaseModel):

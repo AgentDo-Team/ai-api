@@ -1,12 +1,14 @@
 from fastapi import FastAPI
 
 from app.api.auth import router as auth_router
+from app.api.profile import router as profile_router
 from app.common.exception_handlers import register_exception_handlers
 from app.schemas.response import ApiResponse
 
 app = FastAPI(title="ai-api")
 register_exception_handlers(app)
 app.include_router(auth_router)
+app.include_router(profile_router)
 
 
 @app.get("/")
