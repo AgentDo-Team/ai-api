@@ -61,9 +61,6 @@ class Chunk(SQLModel, table=True):
     chunk_index: int = Field(
         sa_column=Column(Integer, nullable=False)
     )  # 문서에서 몇 번째 청크인지
-    lexical_weights: dict[str, float] | None = Field(
-        default=None, sa_column=Column(JSONB)
-    )  # 희소 벡터
     page_no: int | None = Field(default=None, sa_column=Column(Integer))  # 문서 번호
     chunk_metadata: dict | None = Field(
         default=None, sa_column=Column("metadata", JSONB)
