@@ -65,10 +65,10 @@ class IngestionService:
                 # 5. 최종 완료 처리
                 await self.bid_repo.update_status(notice.id, ParseStatus.CHUNKED)
                 await self.session.commit()
-                print(f"🎉 [성공] '{notice.title}' 처리 완료 (청크 {len(chunk_objs)}개)")
+                print(f"[성공] '{notice.title}' 처리 완료 (청크 {len(chunk_objs)}개)")
 
             except Exception as e:
                 await self.session.rollback()
-                print(f"❌ [에러] '{notice.notice_no}' 처리 실패: {e}")
+                print(f"[에러] '{notice.notice_no}' 처리 실패: {e}")
                 await self.bid_repo.update_status(notice.id, ParseStatus.ERROR)
                 await self.session.commit()
