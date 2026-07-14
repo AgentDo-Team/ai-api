@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     # SQL 로그 출력 여부
     db_echo: bool = False
 
+    # JWT 인증 설정
+    # secret_key: JWT 서명용 비밀키. 운영 환경에서는 반드시 .env로 덮어쓸 것 (유출 금지)
+    secret_key: str = "change-me-in-production"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
