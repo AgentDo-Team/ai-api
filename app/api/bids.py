@@ -2,7 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_session 
 from app.schemas.response import ApiResponse
-from app.services.bid_service import BidService, run_bid_pipeline
+from app.services.bid_service import BidService
 
 router = APIRouter(prefix="/bids", tags=["bids"])
 
