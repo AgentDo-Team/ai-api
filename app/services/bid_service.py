@@ -90,7 +90,7 @@ def collect_bids(days_back=7):
             filtered_results.append({
                 "notice_no": bid_no,
                 "title": item.get('bidNtceNm', ''),
-                "demand_org": item.get('ntcelnsttNm'),
+                "demand_org": item.get('dminsttNm'),
                 "budget_krw": int(item.get('asignBdgtAmt', 0)) if item.get('asignBdgtAmt') else None,
                 "procurement_clsfc_no": clsfc_no,
                 "procurement_clsfc_nm": item.get('pubPrcrmntClsfcNm'),
