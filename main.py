@@ -5,7 +5,7 @@ from app.api.auth import router as auth_router
 from app.api.profile import router as profile_router
 from app.common.exception_handlers import register_exception_handlers
 from app.schemas.response import ApiResponse
-from app.api import bids, companies, company_profiles, company_projects
+from app.api import bids, companies, company_profiles, company_projects, ingest
 from app.common.exception_handlers import register_exception_handlers
 from app.schemas.response import ApiResponse
 
@@ -70,6 +70,7 @@ app.include_router(companies.router)
 app.include_router(company_profiles.router)
 app.include_router(company_projects.router)
 app.include_router(bids.router)
+app.include_router(ingest.router)
 
 
 @app.get("/", tags=["system"], summary="루트")
