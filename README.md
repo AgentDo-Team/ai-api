@@ -55,6 +55,28 @@ uv run uvicorn main:app --reload
 - API: http://127.0.0.1:8000
 - Swagger 문서: http://127.0.0.1:8000/docs
 
+## 테스트
+
+DB 없이 도는 단위 테스트입니다. (리포지토리를 가짜로 갈아끼웁니다)
+
+```bash
+uv run pytest
+```
+
+## API
+
+전체 명세와 요청 예시는 Swagger(http://127.0.0.1:8000/docs)에서 확인하세요.
+
+| 메서드 | 경로 | 설명 |
+| --- | --- | --- |
+| POST / GET | `/api/companies` | 회사 등록 / 목록 조회 |
+| GET / PATCH / DELETE | `/api/companies/{company_id}` | 회사 조회 / 수정 / 삭제 (하위 리소스 CASCADE 삭제) |
+| POST / GET / PATCH / DELETE | `/api/companies/{company_id}/profile` | 회사 프로필 CRUD (회사당 1건) |
+| POST / GET | `/api/companies/{company_id}/projects` | 프로젝트 등록 / 목록 조회 |
+| GET / PATCH / DELETE | `/api/companies/{company_id}/projects/{project_id}` | 프로젝트 조회 / 수정 / 삭제 |
+
+모든 응답은 `ApiResponse`(`success` / `message` / `data`) 로 감싸집니다.
+
 ## 데이터베이스 관리
 
 ```bash

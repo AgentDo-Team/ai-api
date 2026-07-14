@@ -58,6 +58,9 @@ class CompanyProfile(SQLModel, table=True):
     )  # 강점과 차별점
     credit_rating: str | None = Field(default=None, max_length=50)  # 신용평가등급
     sp_grade: str | None = Field(default=None, max_length=50)  # SP등급
+    embedding: list[float] | None = Field(
+        default=None, sa_column=Column(Vector(1024))
+    )  # NULL = 미임베딩
     updated_at: datetime | None = Field(
         default=None,
         sa_column=Column(
