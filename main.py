@@ -36,8 +36,7 @@ AI 입찰공고 분석 서비스 API.
 
 실패 시 `success=false`, `message`에 사유가 담기고 `data`는 `null`이다(422 검증 실패만 `data`에 상세가 담긴다).
 
-**임베딩** — CRUD 단계에서는 임베딩하지 않는다. 프로필·프로젝트의 embedding 컬럼은 NULL(`embedded: false`)로
-남고, 이후 추천 단계에서 채운다.
+프로필·프로젝트 응답의 `embedded` 는 벡터 컬럼이 채워졌는지만 알려준다. 지금은 채우는 로직이 없어 항상 `false` 다.
 """
 
 app = FastAPI(

@@ -21,12 +21,6 @@ class Settings(BaseSettings):
     # SQL 로그 출력 여부
     db_echo: bool = False
 
-    # 임베딩 (로컬 Ollama의 BGE-M3)
-    ollama_base_url: str = "http://localhost:11434"
-    embedding_model: str = "bge-m3"
-    embedding_dim: int = 1024
-    embedding_timeout: float = 30.0
-
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
