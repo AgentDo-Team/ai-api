@@ -2,7 +2,7 @@
 
 import jwt
 from fastapi import APIRouter, Depends
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.common.exceptions import AppException
@@ -20,8 +20,9 @@ from app.services import auth_service, profile_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# 로그인 엔드포인트에서 토큰을 발급받아 Authorization: Bearer <token> 로 전달
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+# Authorization: Bearer <token> 헤더에서 토큰을 꺼낸다.
+# auto_error=False: 토큰이 없을 때 기본 403 대신, 아래에서 통일된 401로 처리.
+security = HTTPBearer(auto_error=False)
 
 
 @router.post("/signup")
@@ -50,13 +51,15 @@ async def login(
 
 
 async def get_current_account(
-    token: str = Depends(oauth2_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     session: AsyncSession = Depends(get_session),
 ) -> Company:
     """Bearer 토큰을 검증하고 현재 로그인한 계정(회사)을 반환하는 의존성."""
     credentials_error = AppException("인증 정보가 유효하지 않습니다.", status_code=401)
+    if credentials is None:
+        raise credentials_error
     try:
-        payload = decode_access_token(token)
+        payload = decode_access_token(credentials.credentials)
         account_id = payload.get("sub")
     except jwt.PyJWTError as exc:
         raise credentials_error from exc
