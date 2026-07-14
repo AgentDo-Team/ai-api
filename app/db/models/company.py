@@ -21,12 +21,15 @@ class Company(SQLModel, table=True):
         default=None,
         sa_column=Column(BigInteger, primary_key=True, autoincrement=True),
     )
+    # 계정 = 회사. 로그인 이메일/비밀번호를 이 테이블이 직접 갖는다.
+    email: str = Field(
+        sa_column=Column(String(255), unique=True, nullable=False),
+    )  # 로그인 이메일 (중복 불가)
+    hashed_password: str = Field(
+        sa_column=Column(String(255), nullable=False),
+    )  # bcrypt 해시 (평문 저장 금지)
     name: str | None = Field(default=None, max_length=200)  # 회사명
     contact_name: str | None = Field(default=None, max_length=100)  # 담당자 이름
-    email: str | None = Field(
-        default=None,
-        sa_column=Column(String(255), unique=True),
-    )  # 회사 이메일
     created_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), server_default=func.now(), nullable=False),

@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     # bge-m3 임베딩 서버 주소 (별도 프로세스, 기본 8001 포트)
     embedding_service_url: str = "http://localhost:8001"
 
+    # JWT 인증 설정
+    # secret_key: JWT 서명용 비밀키. 운영 환경에서는 반드시 .env로 덮어쓸 것 (유출 금지)
+    secret_key: str = "change-me-in-production"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
