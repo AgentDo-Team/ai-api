@@ -48,11 +48,16 @@ class IngestionService:
                 # 4. 청크 리스트 저장
                 chunk_objs = []
                 for idx, c in enumerate(final_chunks):
+                    # 기존 코드 수정
                     chunk_objs.append(Chunk(
                         bid_notice_id=notice.id,
                         chunk_index=idx,
                         content=c['content'],
-                        chunk_metadata={"l_topic": c['l_topic'], "s_topic": c['s_topic']}
+                        chunk_metadata={"l_topic": c['l_topic'], "s_topic": c['s_topic']},
+                        # 아래 필드들을 추가하여 모델 구조를 맞춰줍니다
+                        token_count=len(c['content']), 
+                        lexical_weights=None,          
+                        page_no=None                
                     ))
                 
                 await self.chunk_repo.add_all(chunk_objs)
