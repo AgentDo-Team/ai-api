@@ -3,10 +3,9 @@ from app.db.models.bid import Chunk, ParseStatus
 from app.db.repositories.bid_respository import BidNoticeRepository, ChunkRepository
 from app.utils.md_formatter import convert_md_tables_to_html
 from app.llm.toc_extractor import analyze_toc_with_gpt
-from app.utils.text_utils import extract_bullet_hierarchy
+from app.utils.text_utils import extract_bullet_hierarchy, merge_tiny_chunks
 from app.rag.chunking.rfp_chunker import (
     slice_rfp_by_headers, 
-    merge_tiny_chunks, 
     refine_chunks_by_bullets_and_tables
 )
 
