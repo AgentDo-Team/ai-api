@@ -2,7 +2,8 @@
 
 입력폼 저장 시점이 아니라 '전송' 시점에, 아직 임베딩되지 않은
 (embedding IS NULL) 자사 프로필/프로젝트를 임베딩 서버로 보내
-dense/sparse 벡터를 채운다. 한 번 채우면 다음 검색부터는 재사용한다.
+dense 벡터를 채운다. 한 번 채우면 다음 검색부터는 재사용한다.
+(렉시컬 매칭은 chunks.content BM25 인덱스가 담당하므로 희소벡터는 저장하지 않는다.)
 """
 
 from sqlmodel import select
@@ -82,10 +83,9 @@ async def ensure_company_embedded(session: AsyncSession, company_id: int) -> int
     # 3. 임베딩 서버 호출 (입력 순서 = 출력 순서)
     vectors = await embedding_client.embed_texts([text for _, text in targets])
 
-    # 4. 결과를 각 객체의 dense/sparse 컬럼에 채워 저장
+    # 4. 결과를 각 객체의 dense 컬럼에 채워 저장 (렉시컬은 BM25가 담당)
     for (obj, _), vector in zip(targets, vectors):
         obj.embedding = vector["dense"]
-        obj.lexical_weights = vector["sparse"]
         session.add(obj)
 
     await session.commit()
