@@ -18,7 +18,7 @@ def _compose(parts: list[tuple[str, str | None]]) -> str:
     return "\n".join(f"{label}: {value}" for label, value in parts if value)
 
 
-def _profile_text(profile: CompanyProfile) -> str:
+def profile_text(profile: CompanyProfile) -> str:
     return _compose(
         [
             ("기업규모", profile.company_scale),
@@ -31,7 +31,7 @@ def _profile_text(profile: CompanyProfile) -> str:
     )
 
 
-def _project_text(project: CompanyProject) -> str:
+def project_text(project: CompanyProject) -> str:
     return _compose(
         [
             ("프로젝트명", project.title),
@@ -72,9 +72,9 @@ async def ensure_company_embedded(session: AsyncSession, company_id: int) -> int
     # 2. (대상 객체, 임베딩할 텍스트) 목록 구성. 텍스트가 빈 항목은 제외.
     targets: list[tuple[CompanyProfile | CompanyProject, str]] = []
     if profile:
-        targets.append((profile, _profile_text(profile)))
+        targets.append((profile, profile_text(profile)))
     for project in projects:
-        targets.append((project, _project_text(project)))
+        targets.append((project, project_text(project)))
     targets = [(obj, text) for obj, text in targets if text.strip()]
 
     if not targets:

@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.schemas.second_filter import SecondFilterResult
+
 
 class HardFilterCondition(BaseModel):
     """채팅창에서 입력한 정형 필터 조건 (하드 필터링용).
@@ -79,4 +81,8 @@ class BidSearchResponse(BaseModel):
     hard_filtered_count: int = Field(description="1차 하드 필터링 통과 공고 수")
     items: list[BidSearchResultItem] = Field(
         default_factory=list, description="최종(소프트 필터링까지 반영) 공고 목록"
+    )
+    second_filter: SecondFilterResult | None = Field(
+        default=None,
+        description="2차 소프트필터 결과(공고별 랭킹 청크). 3차 필터로 그대로 전달 가능",
     )
