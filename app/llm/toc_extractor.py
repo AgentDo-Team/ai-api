@@ -3,7 +3,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 
 def analyze_toc_with_gpt(raw_text: str) -> DocumentStructure:
-    llm = ChatOpenAI(model="gpt-5.6-luna", temperature=0)
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
     structured_llm = llm.with_structured_output(DocumentStructure)
 
     system_prompt = """
