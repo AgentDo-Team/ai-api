@@ -2,13 +2,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import SQLModel
 
-from app.api import companies, company_profiles, company_projects, third_filter
 from app.api.auth import router as auth_router
 from app.api.profile import router as profile_router
 from app.api.search import router as search_router
 from app.common.exception_handlers import register_exception_handlers
 from app.schemas.response import ApiResponse
-from app.api import bids, companies, company_profiles, company_projects, ingest
+from app.api import bids, companies, company_profiles, company_projects, ingest, third_filter
 from app.common.exception_handlers import register_exception_handlers
 from app.schemas.response import ApiResponse
 
