@@ -2,8 +2,11 @@
 
 1~2단계: extract_evaluation_criteria (table_filter 규칙 기반 스캔 + LLM 세부항목 분리)
 3~5단계: _judge_criterion_once (하이브리드 검색 + LLM 강제 인용 채점 + 무근거시 최하점 가드)
-6단계:   score_criterion (K=3 반복 후 평균/다수결)
+6단계:   score_criterion (EVAL_K회 반복 후 평균/다수결, 기본 1회)
 전체:    evaluate (문서 전체 오케스트레이션, AnalysisResult 영속화)
+
+동시성: 세부항목 채점은 병렬로 돈다. AsyncSession 은 동시 쿼리를 허용하지 않으므로
+항목마다 session_factory 로 독립 세션을 열어 DB 를 읽고, LLM 호출 전에 반납한다.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from app.db.repositories.chunk_repository import ChunkRepository
 from app.db.repositories.company_repository import CompanyProfileRepository, CompanyProjectRepository
 from app.db.repositories.eval_criteria_reference_repository import EvalCriteriaReferenceRepository
 from app.db.repositories.search_set_repository import SearchSetRepository
+from app.db.session import async_session_factory
 from app.llm.base import LLMProvider
 from app.rag.chunking.table_filter import is_eval_criteria_table
 from app.rag.retrievers.hybrid_search import hybrid_search_chunks, semantic_fallback_search_chunks
@@ -47,29 +51,28 @@ _JUDGMENT_SYSTEM_PROMPT = (
 
 
 class EvaluationService:
-    EVAL_K = 3
+    EVAL_K = 1  # 항목당 반복 채점 횟수. 2 이상이면 평균/다수결 집계가 의미를 가진다.
+    MAX_CONCURRENT_CRITERIA = 5  # 항목 병렬 채점 상한 (DB 커넥션/LLM rate limit 보호)
 
     def __init__(
         self,
         session,
         bid_notice_repo: BidNoticeRepository,
         chunk_repo: ChunkRepository,
-        project_repo: CompanyProjectRepository,
-        profile_repo: CompanyProfileRepository,
         analysis_repo: AnalysisResultRepository,
         search_set_repo: SearchSetRepository,
         eval_ref_repo: EvalCriteriaReferenceRepository,
         llm: LLMProvider,
+        session_factory=async_session_factory,
     ) -> None:
         self.session = session
         self.bid_notice_repo = bid_notice_repo
         self.chunk_repo = chunk_repo
-        self.project_repo = project_repo
-        self.profile_repo = profile_repo
         self.analysis_repo = analysis_repo
         self.search_set_repo = search_set_repo
         self.eval_ref_repo = eval_ref_repo
         self.llm = llm
+        self.session_factory = session_factory
 
     # ------------------------------------------------------------------ #
     # 1~2단계: 평가기준표 탐지 + 세부항목 분리, 입찰공고서에서 평가기준표 보고 list[항목명,설명,만점] 가져옴
@@ -108,14 +111,20 @@ class EvaluationService:
     async def _judge_criterion_once( self, bid_notice_id: int, company_id: int, criterion: EvalCriterion) -> CriterionJudgment:
         # EvalCriterion [항목명,설명,만점]
         query_text = criterion.name + (f" {criterion.description}" if criterion.description else "")
-        # 평가 항목과 관련된 청크를 추가로 집어넣고 배점표의 항목이 구체적으로 어떤건지 보완
-        # 하이브리드 서치를 통해 상위 5개 청크 가져온다
-        search_results = await hybrid_search_chunks(
-            self.chunk_repo, self.llm, bid_notice_id, query_text, limit=5
-        )
-        # 평가항목
-        projects = await self.project_repo.list_by_company(company_id, limit=50, offset=0)
-        profile = await self.profile_repo.get_by_company_id(company_id)
+
+        # 항목 채점은 병렬로 돌므로 공유 세션 대신 항목별 독립 세션에서 DB 를 읽고,
+        # 느린 LLM 호출 전에 세션을 닫아 커넥션을 풀에 반납한다.
+        async with self.session_factory() as session:
+            # 평가 항목과 관련된 청크를 추가로 집어넣고 배점표의 항목이 구체적으로 어떤건지 보완
+            # 하이브리드 서치를 통해 상위 5개 청크 가져온다
+            search_results = await hybrid_search_chunks(
+                ChunkRepository(session), self.llm, bid_notice_id, query_text, limit=5
+            )
+            # 평가항목
+            projects = await CompanyProjectRepository(session).list_by_company(
+                company_id, limit=50, offset=0
+            )
+            profile = await CompanyProfileRepository(session).get_by_company_id(company_id)
 
         user_prompt = self._build_judgment_prompt(criterion, search_results, projects, profile)
         judgment = await self.llm.complete_structured(
@@ -205,10 +214,16 @@ class EvaluationService:
 
         criteria = await self.extract_evaluation_criteria(bid_notice_id)
 
-        results = [
-            await self.score_criterion(bid_notice_id, company_id, criterion)
-            for criterion in criteria
-        ]
+        # 항목 병렬 채점 (항목마다 독립 세션이라 동시 실행 안전, 세마포어로 상한 제한)
+        semaphore = asyncio.Semaphore(self.MAX_CONCURRENT_CRITERIA)
+
+        async def _score(criterion: EvalCriterion) -> CriterionScoreResult:
+            async with semaphore:
+                return await self.score_criterion(bid_notice_id, company_id, criterion)
+
+        results: list[CriterionScoreResult] = await asyncio.gather(
+            *[_score(criterion) for criterion in criteria]
+        )
 
         soft_score = round(sum(r.earned_score for r in results))
         chunk_judgments = [
@@ -225,12 +240,21 @@ class EvaluationService:
             for r in results
         ]
 
-        analysis_result = AnalysisResult(
-            search_set_id=search_set_id,
-            bid_notice_id=bid_notice_id,
-            soft_score=soft_score,
-            chunk_judgments=chunk_judgments,
+        # 같은 (search_set_id, bid_notice_id) 재평가 시 uq_analysis_searchset_notice 위반을
+        # 피하기 위해 upsert 한다. recommend_reason/weaknesses/summary 는 건드리지 않는다.
+        analysis_result = await self.analysis_repo.get_by_search_set_and_notice(
+            search_set_id, bid_notice_id
         )
-        await self.analysis_repo.add(analysis_result)
+        if analysis_result is not None:
+            analysis_result.soft_score = soft_score
+            analysis_result.chunk_judgments = chunk_judgments
+        else:
+            analysis_result = AnalysisResult(
+                search_set_id=search_set_id,
+                bid_notice_id=bid_notice_id,
+                soft_score=soft_score,
+                chunk_judgments=chunk_judgments,
+            )
+            await self.analysis_repo.add(analysis_result)
         await self.session.commit()
         return analysis_result
