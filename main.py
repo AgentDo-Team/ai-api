@@ -2,7 +2,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import SQLModel
 
-from app.api import companies, company_profiles, company_projects
 from app.api.auth import router as auth_router
 from app.api.profile import router as profile_router
 from app.api.search import router as search_router
