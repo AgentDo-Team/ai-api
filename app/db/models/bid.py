@@ -48,7 +48,8 @@ class BidNotice(SQLModel, table=True):  # 입찰공고
         default=ParseStatus.PENDING,
         sa_column=Column(SAEnum(ParseStatus))
         ) # 파싱 상태 (Enum)
-    raw_md_text: Optional[str] = sqlmodel.Field(default=None) # 마크다운 원본 전체 텍스트    # 하드 필터링용 정형 메타데이터 (나라장터 API가 공고 단위로 제공)
+    raw_md_text: Optional[str] = sqlmodel.Field(default=None) # 마크다운 원본 전체 텍스트  
+    # 하드 필터링용 정형 메타데이터 (나라장터 API가 공고 단위로 제공)
     procurement_clsfc_no: str | None = Field(
         default=None, max_length=50
     )  # 공공조달 분류번호 (도메인 코드, 예: 81111513) - pubPrcrmntClsfcNo

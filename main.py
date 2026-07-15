@@ -1,8 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import SQLModel
+
+from app.api import companies, company_profiles, company_projects
 from app.api.auth import router as auth_router
 from app.api.profile import router as profile_router
+from app.api.search import router as search_router
 from app.common.exception_handlers import register_exception_handlers
 from app.schemas.response import ApiResponse
 from app.api import bids, companies, company_profiles, company_projects, ingest
@@ -41,6 +44,10 @@ OPENAPI_TAGS = [
             "회사 수행 프로젝트(실적) CRUD (회사당 N건). 이후 입찰공고와의 유사도 검색에 사용된다."
         ),
     },
+    {
+        "name": "bid-notices",
+        "description": "공고 검색. 정형 조건 하드 필터링으로 공고를 추출하고 검색 세션(채팅방)을 저장한다.",
+    },
     {"name": "system", "description": "헬스체크 등 시스템 엔드포인트."},
 ]
 
@@ -66,11 +73,22 @@ app = FastAPI(
 )
 register_exception_handlers(app)
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # 프론트 주소
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(auth_router)
+app.include_router(profile_router)
 app.include_router(companies.router)
 app.include_router(company_profiles.router)
 app.include_router(company_projects.router)
 app.include_router(bids.router)
 app.include_router(ingest.router)
+app.include_router(search_router)
 
 
 @app.get("/", tags=["system"], summary="루트")
