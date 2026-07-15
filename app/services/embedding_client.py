@@ -1,12 +1,11 @@
-"""OpenAI 임베딩 호출 클라이언트.
+""" OpenAI 임베딩 호출 클라이언트.
 
 dense 벡터는 OpenAI `text-embedding-3-small`(dimensions=1024)로 뽑는다.
 렉시컬(정확 용어) 매칭은 chunks.content BM25(pg_search)가 담당하므로
 희소벡터는 만들지 않고 dense만 반환한다.
 
 주의: 텍스트가 OpenAI(외부 API)로 전송된다. 청크·자사 프로필/프로젝트가 반출되므로
-데이터 정책이 허용되는 전제에서만 사용한다.
-"""
+데이터 정책이 허용되는 전제에서만 사용한다. """
 
 from typing import TypedDict
 
