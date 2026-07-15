@@ -14,7 +14,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db.models.analysis import ChatMessage
 from app.db.models.bid import BidNotice
-from app.db.models.search import DomainCode, HardFilter, SearchSet
+from app.db.models.search import HardFilter, SearchSet
 from app.schemas.search import (
     BidSearchRequest,
     BidSearchResponse,
