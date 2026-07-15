@@ -22,6 +22,7 @@ import sqlmodel
 class ParseStatus(str, enum.Enum):
     PENDING = "PENDING"  # 파싱 완료, 청킹 대기 중
     CHUNKED = "CHUNKED"  # 청킹 및 벡터 DB 저장 완료
+    EMBEDDED = "EMBEDDED" # 임베딩 완료
     ERROR = "ERROR"      # 파싱 또는 처리 중 에러 발생
 
 

@@ -1,7 +1,7 @@
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.db.models.bid import BidNotice, Chunk, ParseStatus
+from app.db.models.bid import BidNotice, ParseStatus
 
 class BidNoticeRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -29,11 +29,12 @@ class BidNoticeRepository:
         if notice:
             notice.parse_status = status
             await self.session.flush()
-
-class ChunkRepository:
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
-
-    async def add_all(self, chunks: list[Chunk]) -> None:
-        self.session.add_all(chunks)
-        await self.session.flush()
+    async def get_chunked_notices(self) -> list[BidNotice]:
+        """
+        청크 분할은 완료되었으나(CHUNKED), 
+        아직 임베딩이 완료되지 않은 공고 목록을 조회합니다.
+        """
+        stmt = select(BidNotice).where(BidNotice.parse_status == ParseStatus.CHUNKED)
+        result = await self.session.exec(stmt)
+        
+        return list(result.all())
