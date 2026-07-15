@@ -64,21 +64,3 @@ class HardFilter(SQLModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), server_default=func.now(), nullable=False),
     )
-
-
-class DomainCode(SQLModel, table=True):
-    __tablename__ = "domain_codes"
-
-    id: int | None = Field(
-        default=None,
-        sa_column=Column(BigInteger, primary_key=True, autoincrement=True),
-    )
-    hard_filter_id: int = Field(
-        sa_column=Column(
-            BigInteger,
-            ForeignKey("hard_filters.id", ondelete="CASCADE"),
-            nullable=False,
-        )
-    )
-    domain_code: str | None = Field(default=None, max_length=50)  # 업종코드 (예: 1468)
-    domain_name: str | None = Field(default=None, max_length=50)  # 도메인 이름

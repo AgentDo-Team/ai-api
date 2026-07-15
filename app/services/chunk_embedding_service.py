@@ -1,7 +1,7 @@
 from sqlmodel.ext import asyncio
 import time
 from sqlmodel.ext.asyncio.session import AsyncSession
-from app.db.models.bid import ParseStatus
+from app.core.enums import ParseStatus
 from app.db.repositories.bid_respository import BidNoticeRepository
 from app.db.repositories.chunk_repository import ChunkRepository
 from app.services.embedding_client import embed_texts  # 임베딩 함수 경로에 맞게 수정
