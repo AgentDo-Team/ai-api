@@ -1,7 +1,8 @@
 import tiktoken
 import time
 from sqlmodel.ext.asyncio.session import AsyncSession
-from app.db.models.bid import Chunk, ParseStatus
+from app.core.enums import ParseStatus
+from app.db.models.bid import Chunk
 from app.db.repositories.bid_respository import BidNoticeRepository
 from app.db.repositories.chunk_repository import ChunkRepository
 from app.utils.md_formatter import convert_md_tables_to_html
