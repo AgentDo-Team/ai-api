@@ -8,7 +8,8 @@ import time
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.exc import IntegrityError
-from app.db.models.bid import BidNotice, ParseStatus
+from app.core.enums import ParseStatus
+from app.db.models.bid import BidNotice
 from app.db.repositories.bid_respository import BidNoticeRepository
 from app.rag.loaders.kordoc_loader import parse_file, resolve_kordoc_cmd
 from app.utils.file_utils import get_priority
