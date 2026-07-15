@@ -2,7 +2,7 @@ import re
 
 from app.schemas.rfp_schema import DocumentStructure
 
-
+# 헤더별 분리
 def slice_rfp_by_headers(raw_text: str, doc_structure: DocumentStructure):
     lines = raw_text.split('\n')
     chunks = []
@@ -99,6 +99,7 @@ def slice_rfp_by_headers(raw_text: str, doc_structure: DocumentStructure):
     save_chunk() 
     return chunks
 
+# 단락 기호 별 분리
 def refine_chunks_by_bullets_and_tables(chunks: list, bullet_hierarchy: list) -> list:
     """
     1차로 헤더별로 잘린 청크들을 입력받아,
