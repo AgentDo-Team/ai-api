@@ -21,8 +21,12 @@ class Settings(BaseSettings):
     # SQL 로그 출력 여부
     db_echo: bool = False
 
-    # bge-m3 임베딩 서버 주소 (별도 프로세스, 기본 8001 포트)
-    embedding_service_url: str = "http://localhost:8001"
+    # 임베딩 설정 (OpenAI text-embedding-3-small, dense 1024차원)
+    # 렉시컬(정확 용어) 매칭은 chunks.content BM25(pg_search)가 담당하므로 dense만 쓴다.
+    # openai_api_key는 비워두면 OpenAI SDK가 OPENAI_API_KEY 환경변수를 자동으로 읽는다.
+    openai_api_key: str | None = None
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dim: int = 1024
 
     # JWT 인증 설정
     # secret_key: JWT 서명용 비밀키. 운영 환경에서는 반드시 .env로 덮어쓸 것 (유출 금지)
