@@ -1,9 +1,9 @@
 from datetime import datetime
-
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Column,
+    Enum as SAEnum,
     DateTime,
     ForeignKey,
     Integer,
@@ -13,6 +13,16 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
+import enum
+from datetime import datetime
+from typing import Optional
+
+import sqlmodel
+
+class ParseStatus(str, enum.Enum):
+    PENDING = "PENDING"  # 파싱 완료, 청킹 대기 중
+    CHUNKED = "CHUNKED"  # 청킹 및 벡터 DB 저장 완료
+    ERROR = "ERROR"      # 파싱 또는 처리 중 에러 발생
 
 
 class BidNotice(SQLModel, table=True):  # 입찰공고
@@ -34,7 +44,11 @@ class BidNotice(SQLModel, table=True):  # 입찰공고
     rfp_file_url: str | None = Field(
         default=None, max_length=1000
     )  # 제안요청서 다운로드 url
-    parse_status: str | None = Field(default=None, max_length=20)  # 파싱 상태 (Enum)
+    parse_status: ParseStatus = sqlmodel.Field(
+        default=ParseStatus.PENDING,
+        sa_column=Column(SAEnum(ParseStatus))
+        ) # 파싱 상태 (Enum)
+    raw_md_text: Optional[str] = sqlmodel.Field(default=None) # 마크다운 원본 전체 텍스트  
     # 하드 필터링용 정형 메타데이터 (나라장터 API가 공고 단위로 제공)
     procurement_clsfc_no: str | None = Field(
         default=None, max_length=50

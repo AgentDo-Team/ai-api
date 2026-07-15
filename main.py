@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlmodel import SQLModel
 
 from app.api import companies, company_profiles, company_projects, third_filter
 from app.api.auth import router as auth_router
@@ -7,6 +8,23 @@ from app.api.profile import router as profile_router
 from app.api.search import router as search_router
 from app.common.exception_handlers import register_exception_handlers
 from app.schemas.response import ApiResponse
+from app.api import bids, companies, company_profiles, company_projects, ingest
+from app.common.exception_handlers import register_exception_handlers
+from app.schemas.response import ApiResponse
+
+
+app = FastAPI(title="ai-api")
+register_exception_handlers(app)
+app.include_router(auth_router)
+app.include_router(profile_router)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # 프론트 주소
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 OPENAPI_TAGS = [
     {
@@ -80,6 +98,8 @@ app.include_router(companies.router)
 app.include_router(company_profiles.router)
 app.include_router(company_projects.router)
 app.include_router(third_filter.router)
+app.include_router(bids.router)
+app.include_router(ingest.router)
 app.include_router(search_router)
 
 
@@ -95,5 +115,4 @@ def health_check() -> ApiResponse[dict]:
 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
