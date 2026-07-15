@@ -1,9 +1,10 @@
 """DB 스키마 초기화 스크립트.
 
 실행 순서:
-  1. pgvector 확장(vector) 생성
+  1. 확장 생성: vector(pgvector) + pg_search(BM25)
   2. SQLModel 메타데이터 기반 전체 테이블 생성 (create_all)
   3. 벡터 컬럼(HNSW, cosine) 인덱스 생성
+  4. BM25 렉시컬 인덱스 생성 (chunks.content, 한국어 형태소 분석기)
 
 사용법:
   uv run python -m app.db.init_db
@@ -28,17 +29,30 @@ VECTOR_INDEXES = (
     "ON company_profiles USING hnsw (embedding vector_cosine_ops)",
 )
 
+# BM25 렉시컬 인덱스 (pg_search). content 원문을 한국어 형태소 분석기(korean_lindera)로
+# 색인해 정확 용어 매칭에 사용한다. dense(HNSW)와 함께 하이브리드 검색을 구성.
+LEXICAL_INDEXES = (
+    """CREATE INDEX IF NOT EXISTS idx_chunks_bm25 ON chunks
+       USING bm25 (id, content)
+       WITH (key_field='id', text_fields='{"content":{"tokenizer":{"type":"korean_lindera"}}}')""",
+)
+
 
 async def init_db() -> None:
     async with engine.begin() as conn:
-        # 1. pgvector 확장 (vector 타입 사용 전 반드시 필요)
+        # 1. 확장 생성 (vector 타입 / bm25 인덱스 사용 전 반드시 필요)
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_search"))
 
         # 2. 전체 테이블 생성
         await conn.run_sync(SQLModel.metadata.create_all)
 
-        # 3. 벡터 인덱스 생성
+        # 3. 벡터(HNSW) 인덱스 생성
         for stmt in VECTOR_INDEXES:
+            await conn.execute(text(stmt))
+
+        # 4. BM25 렉시컬 인덱스 생성
+        for stmt in LEXICAL_INDEXES:
             await conn.execute(text(stmt))
 
     await engine.dispose()
