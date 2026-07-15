@@ -3,6 +3,8 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 import requests
+import time
+
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.exc import IntegrityError
@@ -194,10 +196,17 @@ class BidService:
 
     # 비동기 실행을 위한 진입점 래핑
     async def run_bid_pipeline(self):
+        pipeline_start_time = time.time()
         print("🚀 [백그라운드] 공고 수집 및 파싱 파이프라인 시작...")
+
         bid_results = self.collect_bids(days_back=30)
         if bid_results:
             await self.process_and_save_bids(bid_results)
         else:
             print("조건에 맞는 공고가 없습니다.")
-        print(" [백그라운드] 파이프라인 작업 완료!")
+        pipeline_end_time = time.time()
+        elapsed_seconds = pipeline_end_time - pipeline_start_time
+        minutes, seconds = divmod(elapsed_seconds, 60)
+        
+        print(f"\n✅ [백그라운드] 공고 수집 및 파싱 파이프라인 작업이 모두 완료!")
+        print(f"⏱️  총 소요 시간: {int(minutes)}분 {seconds:.2f}초")
