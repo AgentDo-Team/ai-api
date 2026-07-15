@@ -1,26 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from app.api import companies, company_profiles, company_projects, third_filter
 from app.api.auth import router as auth_router
 from app.api.profile import router as profile_router
 from app.common.exception_handlers import register_exception_handlers
 from app.schemas.response import ApiResponse
-from app.api import companies, company_profiles, company_projects
-from app.common.exception_handlers import register_exception_handlers
-from app.schemas.response import ApiResponse
-
-
-app = FastAPI(title="ai-api")
-register_exception_handlers(app)
-app.include_router(auth_router)
-app.include_router(profile_router)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # 프론트 주소
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 OPENAPI_TAGS = [
     {
@@ -38,6 +23,13 @@ OPENAPI_TAGS = [
         "name": "company-projects",
         "description": (
             "회사 수행 프로젝트(실적) CRUD (회사당 N건). 이후 입찰공고와의 유사도 검색에 사용된다."
+        ),
+    },
+    {
+        "name": "third-filter",
+        "description": (
+            "3차 필터. 2차 필터 결과를 받아 평가기준표 기반 채점 후, 최종점수 상위 5건에 대해 "
+            "LLM 적합/부적합 검증과 100자 공고 요약을 수행한다."
         ),
     },
     {"name": "system", "description": "헬스체크 등 시스템 엔드포인트."},
@@ -65,9 +57,20 @@ app = FastAPI(
 )
 register_exception_handlers(app)
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # 프론트 주소
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(auth_router)
+app.include_router(profile_router)
 app.include_router(companies.router)
 app.include_router(company_profiles.router)
 app.include_router(company_projects.router)
+app.include_router(third_filter.router)
 
 
 @app.get("/", tags=["system"], summary="루트")
