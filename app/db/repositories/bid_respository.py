@@ -1,7 +1,8 @@
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.db.models.bid import BidNotice, ParseStatus
+from app.core.enums import ParseStatus
+from app.db.models.bid import BidNotice
 
 class BidNoticeRepository:
     def __init__(self, session: AsyncSession) -> None:
