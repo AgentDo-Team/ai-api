@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
 
+    # LLM / 임베딩 설정 (OpenAI)
+    # embedding_dim 은 DB의 Vector(1024) 컬럼과 반드시 일치해야 한다.
+    openai_api_key: str = ""
+    llm_model: str = "gpt-4o-mini"
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dim: int = 1024
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
