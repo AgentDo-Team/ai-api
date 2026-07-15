@@ -1,0 +1,53 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: "ko-KR"
+early_access: false
+tone_instructions: "간결하고 정중한 한국어로 리뷰하세요. 기술 용어(변수명, 함수명, 라이브러리명)는 원문 그대로 두고 설명만 한국어로 작성합니다."
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  auto_review:
+    enabled: true
+    drafts: false
+
+  path_filters:
+    - "!**/node_modules/**"
+    - "!**/__pycache__/**"
+    - "!**/*.lock"
+    - "!**/package-lock.json"
+    - "!**/uv.lock"
+    - "!**/dist/**"
+    - "!**/build/**"
+
+  path_instructions:
+    - path: "ai-api/**/*.py"
+      instructions: |
+        FastAPI + SQLAlchemy 백엔드입니다. 다음을 중점적으로 확인하세요:
+        - 비동기(async/await) 사용의 정확성과 블로킹 I/O 혼입 여부
+        - Pydantic 스키마 검증 누락, 타입 힌트 정확성
+        - DB 세션 수명 관리, N+1 쿼리, 트랜잭션 처리
+        - 인증/인가 및 사용자 입력 검증, 비밀키·자격증명 하드코딩
+    - path: "ai-api/tests/**/*.py"
+      instructions: |
+        테스트 코드입니다. 경계값·예외 경로 커버리지와 테스트 격리(공유 상태, 실제 외부 호출 여부)를 확인하세요.
+    - path: "fronend_Bidkoc/src/**/*.{js,jsx,ts,tsx,vue}"
+      instructions: |
+        Vite 기반 프론트엔드입니다. 다음을 중점적으로 확인하세요:
+        - 상태 관리 및 렌더링 부작용(불필요한 리렌더, 정리되지 않은 이벤트/타이머)
+        - API 호출의 에러 처리와 로딩 상태 처리
+        - XSS 위험(innerHTML 등), 접근성 기본 사항
+
+  tools:
+    ruff:
+      enabled: true
+    gitleaks:
+      enabled: true
+    markdownlint:
+      enabled: true
+
+chat:
+  auto_reply: true

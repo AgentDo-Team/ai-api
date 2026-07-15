@@ -52,12 +52,12 @@ class AnalysisResult(SQLModel, table=True):
     chunk_judgments: list[dict[str, Any]] | None = Field(
         default=None, sa_column=Column(JSONB)
     )  # [{chunk_id, project_id, similarity, verdict, reason}]
-    recommend_reason: str | None = Field(
-        default=None, sa_column=Column(Text)
-    )  # 추천이유
-    weaknesses: str | None = Field(
-        default=None, sa_column=Column(Text)
-    )  # 보완할 점 (약점)
+    recommend_reason: list[dict[str, Any]] | None = Field(
+        default=None, sa_column=Column(JSONB)
+    )  # 적합 판정 이유 목록: [{chunk_id, reason, cited_source, cited_id, cited_field}]
+    weaknesses: list[dict[str, Any]] | None = Field(
+        default=None, sa_column=Column(JSONB)
+    )  # 부적합 판정 이유 목록: [{chunk_id, reason, cited_source, cited_id, cited_field}]
     summary: str | None = Field(default=None, sa_column=Column(Text))  # 공고 요약
     created_at: datetime | None = Field(
         default=None,

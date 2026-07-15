@@ -27,6 +27,17 @@ VECTOR_INDEXES = (
     "ON company_projects USING hnsw (embedding vector_cosine_ops)",
     "CREATE INDEX IF NOT EXISTS idx_company_profiles_embedding "
     "ON company_profiles USING hnsw (embedding vector_cosine_ops)",
+    "CREATE INDEX IF NOT EXISTS idx_eval_criteria_references_embedding "
+    "ON eval_criteria_references USING hnsw (embedding vector_cosine_ops)",
+)
+
+# BM25 렉시컬 인덱스 (pg_search v2 API). content 컬럼을 한국어 형태소 분석기(pdb.lindera)로
+# 캐스팅해 색인하고, bid_notice_id 는 필터 푸시다운을 위해 함께 색인한다.
+# dense(HNSW)와 함께 하이브리드 검색을 구성한다.
+LEXICAL_INDEXES = (
+    """CREATE INDEX IF NOT EXISTS idx_chunks_bm25 ON chunks
+       USING bm25 (id, bid_notice_id, (content::pdb.lindera(korean)))
+       WITH (key_field='id')""",
 )
 
 # BM25 렉시컬 인덱스 (pg_search). content 원문을 한국어 형태소 분석기(korean_lindera)로
