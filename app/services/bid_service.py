@@ -89,6 +89,12 @@ class BidService:
             if rfp_candidates:
                 rfp_candidates.sort(key=lambda x: x["priority"])
                 best_rfp = rfp_candidates[0]
+                bid_deadline = parse_dt(item.get('bidClseDt'))
+                
+                # 마감일이 없거나, 이미 지났는지 체크 (현재 시각과 비교)
+                # None이거나, 현재 시간보다 과거라면 건너뜀
+                if not bid_deadline or bid_deadline < datetime.now():
+                    continue
                 
                 filtered_results.append({
                     "notice_no": bid_no,
@@ -98,7 +104,7 @@ class BidService:
                     "procurement_clsfc_no": clsfc_no,
                     "procurement_clsfc_nm": item.get('pubPrcrmntClsfcNm'),
                     "joint_venture_method": item.get('cmmnSpldmdMethdNm'),
-                    "bid_deadline": parse_dt(item.get('bidClseDt')),
+                    "bid_deadline": bid_deadline,
                     "rfp_file_url": best_rfp["downloadUrl"],
                     "fileName": best_rfp["fileName"] 
                 })
@@ -154,6 +160,10 @@ class BidService:
                     print(f"  [파싱 성공] 크기: {len(md_text)} bytes")
                 else:
                     print(f"  [파싱 실패] {parse_res.status}")
+            # 파싱된 텍스트가 없으면 저장을 건너뜀
+            if not md_text:
+                print(f"  [경고] 파싱된 내용이 없어 저장하지 않습니다: {r['notice_no']}")
+                continue
 
             new_notice = BidNotice(
                 notice_no=r["notice_no"],
@@ -172,20 +182,20 @@ class BidService:
             try:
                 await self.bid_repo.add(new_notice)
                 await self.session.commit()
-                print(f"  [DB 저장 완료] ID: {new_notice.id}")
+                print(f"[DB 저장 완료] ID: {new_notice.id}")
             except IntegrityError:
                 await self.session.rollback()
-                print("  [DB 에러] 중복 키 또는 무결성 제약 조건 위반")
+                print("[DB 에러] 중복 키 또는 무결성 제약 조건 위반")
             except Exception as e:
                 await self.session.rollback()
-                print(f"  [DB 처리 중 알 수 없는 에러] {e}")
+                print(f"[DB 처리 중 알 수 없는 에러] {e}")
 
         print(f"\n 파이프라인(수집 -> 파싱 -> DB 저장) 완료!")
 
     # 비동기 실행을 위한 진입점 래핑
     async def run_bid_pipeline(self):
         print("🚀 [백그라운드] 공고 수집 및 파싱 파이프라인 시작...")
-        bid_results = self.collect_bids(days_back=7)
+        bid_results = self.collect_bids(days_back=30)
         if bid_results:
             await self.process_and_save_bids(bid_results)
         else:
