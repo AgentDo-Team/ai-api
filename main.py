@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import companies, company_profiles, company_projects, third_filter
 from app.api.auth import router as auth_router
 from app.api.profile import router as profile_router
+from app.api.search import router as search_router
 from app.common.exception_handlers import register_exception_handlers
 from app.schemas.response import ApiResponse
 
@@ -31,8 +32,16 @@ OPENAPI_TAGS = [
             "3차 필터. 2차 필터 결과를 받아 평가기준표 기반 채점 후, 최종점수 상위 5건에 대해 "
             "LLM 적합/부적합 검증과 100자 공고 요약을 수행한다."
         ),
+        
     },
-    {"name": "system", "description": "헬스체크 등 시스템 엔드포인트."},
+    {
+        "name": "bid-notices",
+        "description": "공고 검색. 정형 조건 하드 필터링으로 공고를 추출하고 검색 세션(채팅방)을 저장한다."
+    },    
+    {
+        "name": "system", 
+        "description": "헬스체크 등 시스템 엔드포인트."
+    }
 ]
 
 DESCRIPTION = """
@@ -71,6 +80,7 @@ app.include_router(companies.router)
 app.include_router(company_profiles.router)
 app.include_router(company_projects.router)
 app.include_router(third_filter.router)
+app.include_router(search_router)
 
 
 @app.get("/", tags=["system"], summary="루트")

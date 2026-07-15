@@ -40,6 +40,14 @@ LEXICAL_INDEXES = (
        WITH (key_field='id')""",
 )
 
+# BM25 렉시컬 인덱스 (pg_search). content 원문을 한국어 형태소 분석기(korean_lindera)로
+# 색인해 정확 용어 매칭에 사용한다. dense(HNSW)와 함께 하이브리드 검색을 구성.
+LEXICAL_INDEXES = (
+    """CREATE INDEX IF NOT EXISTS idx_chunks_bm25 ON chunks
+       USING bm25 (id, content)
+       WITH (key_field='id', text_fields='{"content":{"tokenizer":{"type":"korean_lindera"}}}')""",
+)
+
 
 async def init_db() -> None:
     async with engine.begin() as conn:
