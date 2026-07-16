@@ -15,18 +15,6 @@ from app.db.models.company import Company, CompanyProfile, CompanyProject
 # --------------------------------------------------------------------------- #
 
 
-class CompanyCreate(BaseModel):
-    name: str = Field(description="회사명", max_length=200, examples=["에이전트두"])
-    contact_name: str | None = Field(
-        default=None, description="담당자 이름", max_length=100, examples=["김준혁"]
-    )
-    email: EmailStr | None = Field(
-        default=None,
-        description="회사 이메일. 전체 회사 중 유일해야 한다.",
-        examples=["contact@agentdo.io"],
-    )
-
-
 class CompanyUpdate(BaseModel):
     """부분 수정. 보낸 필드만 반영된다."""
 

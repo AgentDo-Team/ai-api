@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, status
 
-from app.api.deps import get_company_service
+from app.api.deps import get_company_service, verify_company_access
 from app.schemas.company import (
     CompanyProfileCreate,
     CompanyProfileRead,
@@ -13,12 +13,21 @@ from app.schemas.company import (
 from app.schemas.response import ApiResponse
 from app.services.company_service import CompanyService
 
-router = APIRouter(prefix="/api/companies/{company_id}/profile", tags=["company-profiles"])
+# JWT 인증 필수. 경로의 company_id가 토큰의 계정(=회사) id와 다르면 403.
+router = APIRouter(
+    prefix="/api/companies/{company_id}/profile",
+    tags=["company-profiles"],
+    dependencies=[Depends(verify_company_access)],
+)
 
 ServiceDep = Annotated[CompanyService, Depends(get_company_service)]
 CompanyIdPath = Annotated[int, Path(description="회사 ID", ge=1)]
 
-NOT_FOUND = {404: {"description": "회사 또는 프로필을 찾을 수 없음"}}
+AUTH_ERRORS = {
+    401: {"description": "인증 정보가 없거나 유효하지 않음"},
+    403: {"description": "본인 회사의 리소스가 아님"},
+}
+NOT_FOUND = {404: {"description": "회사 또는 프로필을 찾을 수 없음"}, **AUTH_ERRORS}
 
 
 @router.post(
@@ -30,6 +39,7 @@ NOT_FOUND = {404: {"description": "회사 또는 프로필을 찾을 수 없음"
     responses={
         404: {"description": "회사를 찾을 수 없음"},
         409: {"description": "이미 프로필이 존재함"},
+        **AUTH_ERRORS,
     },
 )
 async def create_profile(
