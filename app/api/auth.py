@@ -74,6 +74,19 @@ async def get_current_account(
     return company
 
 
+@router.post("/logout")
+async def logout(
+    current_account: Company = Depends(get_current_account),
+) -> ApiResponse[None]:
+    """로그아웃.
+
+    서버는 stateless JWT만 사용하므로 토큰 자체를 무효화하지 않는다.
+    유효한 토큰 소유자인지만 확인하고, 실제 토큰 폐기는 클라이언트가
+    로컬에 저장된 토큰을 삭제하는 방식으로 처리한다.
+    """
+    return ApiResponse.ok(message="로그아웃되었습니다.")
+
+
 @router.get("/me")
 async def me(
     current_account: Company = Depends(get_current_account),
