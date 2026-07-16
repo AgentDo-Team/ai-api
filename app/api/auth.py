@@ -43,9 +43,10 @@ async def login(
     data: LoginRequest,
     session: AsyncSession = Depends(get_session),
 ) -> ApiResponse[TokenResponse]:
-    access_token = await auth_service.login(session, data)
+    access_token, company = await auth_service.login(session, data)
+    has_profile = await profile_service.has_profile(session, company.id)
     return ApiResponse.ok(
-        data=TokenResponse(access_token=access_token),
+        data=TokenResponse(access_token=access_token, has_profile=has_profile),
         message="로그인에 성공했습니다.",
     )
 
