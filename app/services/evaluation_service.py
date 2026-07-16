@@ -1,6 +1,7 @@
 """평가기준표 기반 입찰공고 채점 파이프라인.
 
 1~2단계: extract_evaluation_criteria (table_filter 규칙 기반 스캔 + LLM 세부항목 분리)
+         규칙 기반으로 배점표 청크를 못 찾으면 표준 평가표 템플릿을 대체 채점표로 사용한다.
 3~5단계: _judge_criterion_once (하이브리드 검색 + LLM 강제 인용 채점 + 무근거시 최하점 가드)
 6단계:   score_criterion (EVAL_K회 반복 후 평균/다수결, 기본 1회)
 전체:    evaluate (문서 전체 오케스트레이션, AnalysisResult 영속화)
@@ -12,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from app.common.exceptions import AppException
 from app.db.models.analysis import AnalysisResult
@@ -24,7 +26,7 @@ from app.db.repositories.search_set_repository import SearchSetRepository
 from app.db.session import async_session_factory
 from app.llm.base import LLMProvider
 from app.rag.chunking.table_filter import is_eval_criteria_table
-from app.rag.retrievers.hybrid_search import hybrid_search_chunks, semantic_fallback_search_chunks
+from app.rag.retrievers.hybrid_search import hybrid_search_chunks
 from app.schemas.evaluation import (
     CriteriaExtractionResult,
     CriterionJudgment,
@@ -48,6 +50,13 @@ _JUDGMENT_SYSTEM_PROMPT = (
     "근거를 찾지 못하면 verdict='no_evidence' 로 하고 score=0 으로 답하라. "
     "절대로 근거 없이 점수를 지어내지 마라. score 는 0 이상 max_score 이하여야 한다."
 )
+
+# 규칙 기반 하드필터가 배점표 청크를 못 찾을 때 사용할 표준 평가표 템플릿.
+# 임베딩(semantic) 검색이 불안정해, 하이브리드 검색 대신 이 템플릿을 대체 채점표로 쓴다.
+_FALLBACK_TEMPLATE_DIR = (
+    Path(__file__).resolve().parents[1] / "rag" / "reference_data" / "eval_criteria_templates"
+)
+_FALLBACK_TEMPLATE_FILENAME = "01_기본제안서_평가표.md"
 
 
 class EvaluationService:
@@ -83,18 +92,18 @@ class EvaluationService:
         # 1차: 청크에서 '평가기준표'에 해당하는 청크만 규칙 기반으로 추려낸다 (하드 필터)
         matched = [c for c in chunks if c.content and is_eval_criteria_table(c.content)]
 
-        # 2차: 하드 필터가 하나도 못 찾으면, 참조 코퍼스(EvalCriteriaReference)를 쿼리로 삼아
-        # 이 bid_notice 청크들 중 '평가기준표'와 의미적으로 유사한 청크를 하이브리드(semantic) 검색으로 찾는다.
-        if not matched:
-            fallback_results = await semantic_fallback_search_chunks(
-                self.chunk_repo, self.eval_ref_repo, self.llm, bid_notice_id, limit=5
+        if matched:
+            joined_text = "\n\n".join(c.content for c in matched if c.content)
+        else:
+            # 하드 필터가 배점표 청크를 하나도 못 찾은 경우.
+            # 임베딩 하이브리드 검색은 결과가 불안정해, 표준 평가표 템플릿을 대체 채점표로 사용한다.
+            print(
+                f"[evaluation] bid_notice_id={bid_notice_id}: "
+                f"적절한 배점표 청크를 찾지 못해 대체 채점표를 사용합니다 "
+                f"(template={_FALLBACK_TEMPLATE_FILENAME})"
             )
-            matched = [r.chunk for r in fallback_results if r.chunk.content]
+            joined_text = self._load_fallback_template_text()
 
-        if not matched:
-            raise AppException("평가기준표를 찾을 수 없습니다.", status_code=404)
-
-        joined_text = "\n\n".join(c.content for c in matched if c.content)
         result = await self.llm.complete_structured(
             system=_CRITERIA_EXTRACTION_SYSTEM_PROMPT,
             user=joined_text,
@@ -103,6 +112,12 @@ class EvaluationService:
         if not result.criteria:
             raise AppException("평가기준표에서 세부평가 항목을 분리하지 못했습니다.", status_code=422)
         return result.criteria # criteria: list[EvalCriterion]
+
+    @staticmethod
+    def _load_fallback_template_text() -> str:
+        """대체 채점표(표준 평가표 템플릿) 원문을 읽어온다."""
+        path = _FALLBACK_TEMPLATE_DIR / _FALLBACK_TEMPLATE_FILENAME
+        return path.read_text(encoding="utf-8")
 
     # ------------------------------------------------------------------ #
     # 3~5단계: 세부항목 1개, 1회 채점
