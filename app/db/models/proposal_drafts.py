@@ -28,14 +28,13 @@ class ProposalDraft(SQLModel, table=True):
         )
     )  # 분석 대상 공고 (1:n)
     
-    company_id: int = Field(
+    search_set_id: int = Field(
         sa_column=Column(
             BigInteger,
-            # 만약 companies 테이블이 있다면 아래 ForeignKey 주석을 해제하여 사용하세요.
             # ForeignKey("companies.id", ondelete="CASCADE"), 
             nullable=False,
         )
-    )  # 매칭된 자사 정보 (1:n)
+    )  # 매칭된 결과 정보 (1:n)
     
     draft_data: dict = Field(
         sa_column=Column(JSONB, nullable=False)
