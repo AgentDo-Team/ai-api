@@ -20,6 +20,8 @@ async def signup(session: AsyncSession, data: SignupRequest) -> Company:
     company = Company(
         email=data.email,
         hashed_password=hash_password(data.password),
+        name=data.name,
+        contact_name=data.contact_name,
     )
     session.add(company)
     await session.commit()
