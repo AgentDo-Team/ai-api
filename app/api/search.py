@@ -9,10 +9,16 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.api.deps import CurrentAccountDep, get_search_set_repository
+from app.api.deps import (
+    CurrentAccountDep,
+    get_analysis_repository,
+    get_search_set_repository,
+)
 from app.common.exceptions import AppException
+from app.db.repositories.analysis_repository import AnalysisResultRepository
 from app.db.repositories.search_set_repository import SearchSetRepository
 from app.db.session import get_session
+from app.schemas.analysis import AnalysisResultRead, AnalysisResultsResponse
 from app.schemas.response import ApiResponse
 from app.schemas.search import BidSearchRequest, BidSearchResponse, SearchSetStatusResponse
 from app.services import search_service
@@ -51,4 +57,38 @@ async def get_search_set_status(
 
     return ApiResponse.ok(
         data=SearchSetStatusResponse(search_set_id=search_set.id, status=search_set.status)
+    )
+
+
+@router.get("/search-sets/{search_set_id}/analysis-results")
+async def get_analysis_results(
+    search_set_id: int,
+    current_account: CurrentAccountDep,
+    search_set_repo: Annotated[SearchSetRepository, Depends(get_search_set_repository)],
+    analysis_repo: Annotated[
+        AnalysisResultRepository, Depends(get_analysis_repository)
+    ],
+) -> ApiResponse[AnalysisResultsResponse]:
+    """검색세트의 분석 결과(3차 필터 산출물) 목록 조회. 최종점수 내림차순. 본인 회사만."""
+    search_set = await search_set_repo.get(search_set_id)
+    if search_set is None:
+        raise AppException("검색세트를 찾을 수 없습니다.", status_code=404)
+    if search_set.company_id != current_account.id:
+        raise AppException("본인 회사의 검색세트만 조회할 수 있습니다.", status_code=403)
+
+    rows = await analysis_repo.list_by_search_set(search_set_id)
+    results = [
+        AnalysisResultRead(
+            bid_notice_id=analysis.bid_notice_id,
+            final_score=analysis.soft_score,
+            recommend_reason=analysis.recommend_reason or [],
+            weaknesses=analysis.weaknesses or [],
+            summary=analysis.summary,
+            title=notice.title,
+            demand_org=notice.demand_org,
+        )
+        for analysis, notice in rows
+    ]
+    return ApiResponse.ok(
+        data=AnalysisResultsResponse(search_set_id=search_set_id, results=results)
     )
