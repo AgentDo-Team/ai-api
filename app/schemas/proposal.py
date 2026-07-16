@@ -5,7 +5,7 @@ from typing import List
 class DraftRequest(BaseModel):
     user_message: str
     bid_notice_id: int
-    company_id: int
+    search_set_id: int
     
 # --- 초안 데이터 (draft_data) ---
 class RelatedProject(BaseModel):
