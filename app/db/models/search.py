@@ -48,6 +48,9 @@ class HardFilter(SQLModel, table=True):
             unique=True,
         )
     )  # 검색세트:하드필터 = 1:1
+    domain_code: str | None = Field(
+        default=None, max_length=50
+    )  # 도메인 분류코드 (ProcurementCategory 로 검증된 단일 코드)
     joint_venture: bool | None = Field(
         default=None, sa_column=Column(Boolean)
     )  # 공동수급여부
