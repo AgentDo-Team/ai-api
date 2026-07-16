@@ -19,6 +19,7 @@ dependencies = [
     "langchain-openai>=1.3.5",
     "langchain-core>=1.4.9",
     "openai>=2.45.0",            # dense 임베딩 (text-embedding-3-small)
+    "tiktoken>=0.13.0",
 ]
 
 [dependency-groups]
