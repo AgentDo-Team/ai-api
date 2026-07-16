@@ -6,9 +6,12 @@ DB 없이 전 엔드포인트를 검증할 수 있다.
 
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Path
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.api.auth import get_current_account
+from app.common.exceptions import AppException
+from app.db.models.company import Company
 from app.db.repositories.company_repository import (
     CompanyProfileRepository,
     CompanyProjectRepository,
@@ -20,6 +23,20 @@ from app.services.company_service import CompanyService
 from app.services.third_filter_service import ThirdFilterService
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+CurrentAccountDep = Annotated[Company, Depends(get_current_account)]
+
+
+async def verify_company_access(
+    company_id: Annotated[int, Path(description="회사 ID", ge=1)],
+    current_account: CurrentAccountDep,
+) -> None:
+    """경로의 company_id가 JWT 토큰의 계정(=회사) id와 일치하는지 검증한다.
+
+    계정 = 회사 구조이므로, 본인 회사의 프로필/프로젝트만 접근할 수 있다.
+    토큰 없음/무효 → 401 (get_current_account), 남의 회사 → 403.
+    """
+    if current_account.id != company_id:
+        raise AppException("본인 회사의 리소스만 접근할 수 있습니다.", status_code=403)
 
 
 def get_company_service(session: SessionDep) -> CompanyService:

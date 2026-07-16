@@ -6,6 +6,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    String,
     func,
 )
 from sqlmodel import Field, SQLModel
@@ -48,6 +49,9 @@ class HardFilter(SQLModel, table=True):
             unique=True,
         )
     )  # 검색세트:하드필터 = 1:1
+    domain_code: str | None = Field(
+        default=None, sa_column=Column(String(50))
+    )  # 도메인 분류코드 (ProcurementCategory 코드값). 한 검색당 하나만 선택 가능
     joint_venture: bool | None = Field(
         default=None, sa_column=Column(Boolean)
     )  # 공동수급여부
@@ -64,21 +68,3 @@ class HardFilter(SQLModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), server_default=func.now(), nullable=False),
     )
-
-
-class DomainCode(SQLModel, table=True):
-    __tablename__ = "domain_codes"
-
-    id: int | None = Field(
-        default=None,
-        sa_column=Column(BigInteger, primary_key=True, autoincrement=True),
-    )
-    hard_filter_id: int = Field(
-        sa_column=Column(
-            BigInteger,
-            ForeignKey("hard_filters.id", ondelete="CASCADE"),
-            nullable=False,
-        )
-    )
-    domain_code: str | None = Field(default=None, max_length=50)  # 업종코드 (예: 1468)
-    domain_name: str | None = Field(default=None, max_length=50)  # 도메인 이름

@@ -77,34 +77,57 @@ class ChunkRepository:
         return list(result.all())
 
     async def dense_search(
-        self, bid_notice_id: int, query_embedding: list[float], limit: int = 10
+        self,
+        bid_notice_id: int,
+        query_embedding: list[float],
+        limit: int = 10,
+        l_topics: list[str] | None = None,
     ) -> list[tuple[Chunk, float]]:
-        """코사인 거리 오름차순(가까울수록 유사). embedding 이 NULL 인 청크는 제외."""
+        """코사인 거리 오름차순(가까울수록 유사). embedding 이 NULL 인 청크는 제외.
+
+        l_topics 를 주면 chunk_metadata.l_topic(개요/요구사항/평가기준/기타)이
+        그 목록에 드는 청크로만 좁힌다(2차 소프트필터의 도메인 스코프용).
+        """
         distance = Chunk.embedding.cosine_distance(query_embedding).label("distance")
-        result = await self.session.exec(
+        stmt = (
             select(Chunk, distance)
             .where(Chunk.bid_notice_id == bid_notice_id, Chunk.embedding.is_not(None))
-            .order_by(distance)
-            .limit(limit)
         )
+        if l_topics:
+            stmt = stmt.where(Chunk.chunk_metadata["l_topic"].astext.in_(l_topics))
+        result = await self.session.exec(stmt.order_by(distance).limit(limit))
         return [(row[0], row[1]) for row in result.all()]
 
     async def sparse_search(
-        self, bid_notice_id: int, query_text: str, limit: int = 10
+        self,
+        bid_notice_id: int,
+        query_text: str,
+        limit: int = 10,
+        l_topics: list[str] | None = None,
     ) -> list[tuple[Chunk, float]]:
-        """BM25 스코어(pg_search) 내림차순. idx_chunks_bm25 인덱스를 사용한다."""
+        """BM25 스코어(pg_search) 내림차순. idx_chunks_bm25 인덱스를 사용한다.
+
+        l_topics 를 주면 chunk_metadata.l_topic 이 그 목록에 드는 청크로만 좁힌다.
+        """
+        topic_clause = "AND metadata->>'l_topic' = ANY(:l_topics)" if l_topics else ""
         rows = await self.session.execute(
             text(
-                """
+                f"""
                 SELECT id, pdb.score(id) AS rank
                 FROM chunks
                 WHERE bid_notice_id = :bid_notice_id
                   AND content ||| :query_text
+                  {topic_clause}
                 ORDER BY rank DESC
                 LIMIT :limit
                 """
             ),
-            {"bid_notice_id": bid_notice_id, "query_text": query_text, "limit": limit},
+            {
+                "bid_notice_id": bid_notice_id,
+                "query_text": query_text,
+                "limit": limit,
+                **({"l_topics": l_topics} if l_topics else {}),
+            },
         )
         ranked = [(row.id, row.rank) for row in rows]
         if not ranked:

@@ -8,23 +8,12 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+from app.core.enums import CompanyScale, CreditRating, SpGrade
 from app.db.models.company import Company, CompanyProfile, CompanyProject
 
 # --------------------------------------------------------------------------- #
 # Company
 # --------------------------------------------------------------------------- #
-
-
-class CompanyCreate(BaseModel):
-    name: str = Field(description="회사명", max_length=200, examples=["에이전트두"])
-    contact_name: str | None = Field(
-        default=None, description="담당자 이름", max_length=100, examples=["김준혁"]
-    )
-    email: EmailStr | None = Field(
-        default=None,
-        description="회사 이메일. 전체 회사 중 유일해야 한다.",
-        examples=["contact@agentdo.io"],
-    )
 
 
 class CompanyUpdate(BaseModel):
@@ -57,8 +46,8 @@ class CompanyRead(BaseModel):
 
 
 class CompanyProfileCreate(BaseModel):
-    company_scale: str | None = Field(
-        default=None, max_length=50, description="기업규모 (대/중견/중소)", examples=["중소기업"]
+    company_scale: CompanyScale | None = Field(
+        default=None, description="기업규모 (대/중견/중소)", examples=[CompanyScale.SMALL]
     )
     target_techs: str | None = Field(
         default=None,
@@ -77,11 +66,11 @@ class CompanyProfileCreate(BaseModel):
         description="강점과 차별점",
         examples=["국방 도메인 RAG 구축 경험 다수"],
     )
-    credit_rating: str | None = Field(
-        default=None, max_length=50, description="신용평가등급", examples=["A+"]
+    credit_rating: CreditRating | None = Field(
+        default=None, description="신용평가등급", examples=[CreditRating.A_PLUS]
     )
-    sp_grade: str | None = Field(
-        default=None, max_length=50, description="SP등급", examples=["1등급"]
+    sp_grade: SpGrade | None = Field(
+        default=None, description="SP등급", examples=[SpGrade.GRADE_1]
     )
 
 
@@ -94,12 +83,12 @@ class CompanyProfileRead(BaseModel):
 
     id: int = Field(description="프로필 ID")
     company_id: int = Field(description="소속 회사 ID")
-    company_scale: str | None = None
+    company_scale: CompanyScale | None = None
     target_techs: str | None = None
     offered_solutions: str | None = None
     strengths_diff: str | None = None
-    credit_rating: str | None = None
-    sp_grade: str | None = None
+    credit_rating: CreditRating | None = None
+    sp_grade: SpGrade | None = None
     embedded: bool = Field(
         default=False,
         description="임베딩이 채워졌는지 여부. CRUD 는 임베딩하지 않으므로 추천 단계 전까지는 false.",

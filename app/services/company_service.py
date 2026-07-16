@@ -12,7 +12,6 @@ from app.db.repositories.company_repository import (
     CompanyRepository,
 )
 from app.schemas.company import (
-    CompanyCreate,
     CompanyProfileCreate,
     CompanyProfileUpdate,
     CompanyProjectCreate,
@@ -38,23 +37,11 @@ class CompanyService:
     # Company
     # ------------------------------------------------------------------ #
 
-    async def create_company(self, data: CompanyCreate) -> Company:
-        if data.email and await self.company_repo.get_by_email(data.email):
-            raise AppException("이미 등록된 이메일입니다.", status_code=409)
-
-        company = Company(**data.model_dump())
-        await self.company_repo.add(company)
-        await self.session.commit()
-        return company
-
     async def get_company(self, company_id: int) -> Company:
         company = await self.company_repo.get(company_id)
         if company is None:
             raise AppException("회사를 찾을 수 없습니다.", status_code=404)
         return company
-
-    async def list_companies(self, limit: int, offset: int) -> list[Company]:
-        return await self.company_repo.list(limit=limit, offset=offset)
 
     async def update_company(self, company_id: int, data: CompanyUpdate) -> Company:
         company = await self.get_company(company_id)

@@ -26,12 +26,6 @@ class CompanyRepository:
         result = await self.session.exec(select(Company).where(Company.email == email))
         return result.first()
 
-    async def list(self, limit: int = 20, offset: int = 0) -> list[Company]:
-        result = await self.session.exec(
-            select(Company).order_by(Company.id).offset(offset).limit(limit)
-        )
-        return list(result.all())
-
     async def delete(self, company: Company) -> None:
         await self.session.delete(company)
 

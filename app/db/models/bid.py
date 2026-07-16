@@ -3,9 +3,9 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Column,
-    Enum as SAEnum,
     DateTime,
     ForeignKey,
+    Enum as SAEnum,
     Integer,
     Text,
     UniqueConstraint,
@@ -13,18 +13,10 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
-import enum
 from datetime import datetime
 from typing import Optional
-
 import sqlmodel
-
-class ParseStatus(str, enum.Enum):
-    PENDING = "PENDING"  # 파싱 완료, 청킹 대기 중
-    CHUNKED = "CHUNKED"  # 청킹 및 벡터 DB 저장 완료
-    EMBEDDED = "EMBEDDED" # 임베딩 완료
-    ERROR = "ERROR"      # 파싱 또는 처리 중 에러 발생
-
+from app.core.enums import ParseStatus
 
 class BidNotice(SQLModel, table=True):  # 입찰공고
     __tablename__ = "bid_notices"
@@ -45,7 +37,7 @@ class BidNotice(SQLModel, table=True):  # 입찰공고
     rfp_file_url: str | None = Field(
         default=None, max_length=1000
     )  # 제안요청서 다운로드 url
-    parse_status: ParseStatus = sqlmodel.Field(
+    parse_status: ParseStatus = Field(
         default=ParseStatus.PENDING,
         sa_column=Column(SAEnum(ParseStatus))
         ) # 파싱 상태 (Enum)

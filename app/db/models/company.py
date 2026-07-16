@@ -6,11 +6,13 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Enum as SAEnum,
     String,
     Text,
     func,
 )
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field, SQLModel, Column
+from app.core.enums import CompanyScale, CreditRating, SpGrade
 
 
 class Company(SQLModel, table=True):
@@ -50,14 +52,23 @@ class CompanyProfile(SQLModel, table=True):
             unique=True,
         )
     )
-    company_scale: str | None = Field(default=None, max_length=50)  # 기업규모 (대/중/소)
+    company_scale: CompanyScale = Field(
+        default=CompanyScale.MIDDLE,
+        sa_column=Column(SAEnum(CompanyScale))
+    )  # 기업규모 (대/중/소)
     target_techs: str | None = Field(default=None, max_length=200)  # 주력 기술/사업
     offered_solutions: str | None = Field(default=None, max_length=200)  # 보유 솔루션
     strengths_diff: str | None = Field(
         default=None, sa_column=Column(Text)
     )  # 강점과 차별점
-    credit_rating: str | None = Field(default=None, max_length=50)  # 신용평가등급
-    sp_grade: str | None = Field(default=None, max_length=50)  # SP등급
+    credit_rating: CreditRating = Field(
+        default = CreditRating.A_PLUS,
+        sa_column=Column(SAEnum(CreditRating))
+    )  # 신용평가등급
+    sp_grade: SpGrade = Field(
+        default = SpGrade.GRADE_3,
+        sa_column=Column(SAEnum(SpGrade))
+    )  # SP등급
     # 소프트 필터링용 dense 벡터. 전송 시점에 지연 임베딩 (NULL = 미임베딩)
     # 렉시컬(정확 용어) 매칭은 chunks.content BM25 인덱스가 담당 → 희소벡터 컬럼 불필요
     embedding: list[float] | None = Field(
