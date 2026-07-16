@@ -3,7 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import SQLModel
 
 from app.api.auth import router as auth_router
-from app.api.profile import router as profile_router
 from app.api.search import router as search_router
 from app.common.exception_handlers import register_exception_handlers
 from app.schemas.response import ApiResponse
@@ -78,7 +77,6 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
-app.include_router(profile_router)
 app.include_router(companies.router)
 app.include_router(company_profiles.router)
 app.include_router(company_projects.router)
