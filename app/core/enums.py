@@ -100,4 +100,8 @@ ProcurementCategory = enum.Enum(
 
 # ChatMessage의 role
 
-# SearchSet의 status
+# SearchSet의 status. 채팅방(검색세션) 단위 분석 진행 상태 — 프론트가 폴링으로 확인한다.
+class SearchSetStatus(str, enum.Enum):
+    ONGOING_SECOND_FILTER = "ongoing_second_filter"  # 2차 소프트필터 진행 중
+    ONGOING_THIRD_FILTER = "ongoing_third_filter"  # 3차 필터(배점표 채점) 진행 중
+    COMPLETED = "completed"  # 3차 필터까지 완료

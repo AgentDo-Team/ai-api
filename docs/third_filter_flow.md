@@ -12,6 +12,8 @@
 
 **동기 API**다. 공고 간 병렬(동시 3건) + 공고 내 세부항목 병렬(동시 5개) 채점으로, 공고 1건당 약 10초 안팎 — 공고 10건 기준 대략 **40~60초**가 걸린다. 프론트/프록시의 HTTP 타임아웃은 여유 있게 **2~3분**으로 잡는 것을 권장한다(세부항목이 많은 RFP, LLM rate limit 등 변수가 있다).
 
+동기 호출이라 응답을 기다리는 동안 프론트가 별도 창구로 진행 상태를 확인할 수 있도록, 시작 시 `search_sets.status` 를 `ongoing_third_filter` 로, 끝나면(성공 시) `completed` 로 갱신한다. `GET /bid-notices/search-sets/{search_set_id}/status` 로 폴링한다 — 자세한 내용은 [search_set_status_polling.md](./search_set_status_polling.md) 참고.
+
 ## 요청 예시
 
 ```json

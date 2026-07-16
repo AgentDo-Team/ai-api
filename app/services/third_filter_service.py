@@ -20,6 +20,7 @@ import logging
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.common.exceptions import AppException
+from app.core.enums import SearchSetStatus
 from app.db.models.analysis import AnalysisResult
 from app.db.repositories.analysis_repository import AnalysisResultRepository
 from app.db.repositories.bid_notice_repository import BidNoticeRepository
@@ -124,6 +125,11 @@ class ThirdFilterService:
     async def run(self, req: ThirdFilterRequest) -> ThirdFilterResponse:
         skipped: list[SkippedNotice] = []
 
+        # 3차 필터 시작 → 검색세트 상태를 진행중으로 갱신(폴링용).
+        await self._set_search_set_status(
+            req.search_set_id, SearchSetStatus.ONGOING_THIRD_FILTER
+        )
+
         # 1단계: 모든 공고 배점표 채점 (공고별 독립 세션으로 병렬)
         outcomes = await asyncio.gather(
             *[self._evaluate_notice(req, item) for item in req.results]
@@ -148,7 +154,16 @@ class ThirdFilterService:
             else:
                 results.append(item)
 
+        # 3차 필터 완료 → 검색세트 상태를 완료로 갱신(폴링 종료 신호).
+        await self._set_search_set_status(req.search_set_id, SearchSetStatus.COMPLETED)
+
         return ThirdFilterResponse(results=results, skipped=skipped)
+
+    async def _set_search_set_status(
+        self, search_set_id: int, status: SearchSetStatus
+    ) -> None:
+        async with self.session_factory() as session:
+            await SearchSetRepository(session).set_status(search_set_id, status)
 
     # ------------------------------------------------------------------ #
     # 1단계: 공고 1건 채점

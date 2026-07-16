@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.core.enums import SearchSetStatus
 from app.db.models.search import SearchSet
 
 
@@ -22,3 +23,15 @@ class SearchSetRepository:
 
     async def get(self, search_set_id: int) -> SearchSet | None:
         return await self.session.get(SearchSet, search_set_id)
+
+    async def set_status(
+        self, search_set_id: int, status: SearchSetStatus
+    ) -> SearchSet | None:
+        """검색세트 상태를 갱신하고 커밋한다. 존재하지 않으면 None."""
+        search_set = await self.get(search_set_id)
+        if search_set is None:
+            return None
+        search_set.status = status.value
+        self.session.add(search_set)
+        await self.session.commit()
+        return search_set
