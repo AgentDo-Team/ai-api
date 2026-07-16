@@ -43,9 +43,10 @@ async def login(
     data: LoginRequest,
     session: AsyncSession = Depends(get_session),
 ) -> ApiResponse[TokenResponse]:
-    access_token = await auth_service.login(session, data)
+    access_token, company = await auth_service.login(session, data)
+    has_profile = await profile_service.has_profile(session, company.id)
     return ApiResponse.ok(
-        data=TokenResponse(access_token=access_token),
+        data=TokenResponse(access_token=access_token, has_profile=has_profile),
         message="로그인에 성공했습니다.",
     )
 
@@ -71,6 +72,19 @@ async def get_current_account(
     if company is None:
         raise credentials_error
     return company
+
+
+@router.post("/logout")
+async def logout(
+    current_account: Company = Depends(get_current_account),
+) -> ApiResponse[None]:
+    """로그아웃.
+
+    서버는 stateless JWT만 사용하므로 토큰 자체를 무효화하지 않는다.
+    유효한 토큰 소유자인지만 확인하고, 실제 토큰 폐기는 클라이언트가
+    로컬에 저장된 토큰을 삭제하는 방식으로 처리한다.
+    """
+    return ApiResponse.ok(message="로그아웃되었습니다.")
 
 
 @router.get("/me")

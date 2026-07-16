@@ -42,9 +42,10 @@ async def test_create_project_for_missing_company_returns_404(client):
     assert response.json()["message"] == "회사를 찾을 수 없습니다."
 
 
-async def test_list_projects_returns_only_that_companys_projects(client, company):
-    other = await client.post("/api/companies", json={"name": "다른회사", "email": "b@x.io"})
-    other_id = other.json()["data"]["id"]
+async def test_list_projects_returns_only_that_companys_projects(
+    client, company, other_company
+):
+    other_id = other_company["id"]
 
     await client.post(f"/api/companies/{company['id']}/projects", json=PROJECT_BODY)
     await client.post(
@@ -87,16 +88,17 @@ async def test_get_project(client, company):
     assert response.json()["data"]["client"] == "국방부"
 
 
-async def test_get_project_of_another_company_returns_404(client, company):
+async def test_get_project_of_another_company_returns_404(
+    client, company, other_company
+):
     created = await client.post(
         f"/api/companies/{company['id']}/projects", json=PROJECT_BODY
     )
     project_id = created.json()["data"]["id"]
 
-    other = await client.post("/api/companies", json={"name": "다른회사", "email": "b@x.io"})
-    other_id = other.json()["data"]["id"]
-
-    response = await client.get(f"/api/companies/{other_id}/projects/{project_id}")
+    response = await client.get(
+        f"/api/companies/{other_company['id']}/projects/{project_id}"
+    )
 
     assert response.status_code == 404
     assert response.json()["message"] == "프로젝트를 찾을 수 없습니다."
@@ -127,17 +129,17 @@ async def test_update_project_only_changes_sent_fields(client, company, project_
     assert project_repo.rows[project_id].embedding is None
 
 
-async def test_update_project_of_another_company_returns_404(client, company):
+async def test_update_project_of_another_company_returns_404(
+    client, company, other_company
+):
     created = await client.post(
         f"/api/companies/{company['id']}/projects", json=PROJECT_BODY
     )
     project_id = created.json()["data"]["id"]
 
-    other = await client.post("/api/companies", json={"name": "다른회사", "email": "b@x.io"})
-    other_id = other.json()["data"]["id"]
-
     response = await client.patch(
-        f"/api/companies/{other_id}/projects/{project_id}", json={"title": "탈취"}
+        f"/api/companies/{other_company['id']}/projects/{project_id}",
+        json={"title": "탈취"},
     )
 
     assert response.status_code == 404

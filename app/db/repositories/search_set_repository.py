@@ -1,6 +1,6 @@
 """검색세트(search_set) 영속성 계층.
 
-AnalysisResult 의 FK 를 충족시키기 위한 최소 구현이다. HardFilter/DomainCode 를 포함한
+AnalysisResult 의 FK 를 충족시키기 위한 최소 구현이다. HardFilter 를 포함한
 검색세트 전체 CRUD 는 별도 기능 범위라 여기서는 다루지 않는다.
 """
 

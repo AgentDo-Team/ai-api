@@ -64,6 +64,12 @@ class SpGrade(str, enum.Enum):
         }
         return mapping.get(self.value, "")
     
+
+# BidNotice 관련
+# 도메인 분류코드 (나라장터 품목분류번호). 멤버명은 코드값 그 자체(키), value는 프론트
+# 표시용 한글명. 코드가 숫자로 시작해 class 본문 문법(식별자)으로는 못 쓰므로 함수형
+# Enum 생성 방식을 쓴다. 시스템 내부(BidNotice.procurement_clsfc_no 등 DB 컬럼)에서는
+# 코드 문자열 그대로 다루다가, 조회 시 ProcurementCategory[code].value 로 한글명을 얻는다.
 ProcurementCategory = enum.Enum(
     "ProcurementCategory",
     {
@@ -90,3 +96,8 @@ ProcurementCategory = enum.Enum(
     },
     type=str,
 )
+
+
+# ChatMessage의 role
+
+# SearchSet의 status

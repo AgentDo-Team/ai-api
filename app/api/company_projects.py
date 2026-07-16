@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, status
 
-from app.api.deps import get_company_service
+from app.api.deps import get_company_service, verify_company_access
 from app.schemas.company import (
     CompanyProjectCreate,
     CompanyProjectRead,
@@ -13,13 +13,22 @@ from app.schemas.company import (
 from app.schemas.response import ApiResponse
 from app.services.company_service import CompanyService
 
-router = APIRouter(prefix="/api/companies/{company_id}/projects", tags=["company-projects"])
+# JWT 인증 필수. 경로의 company_id가 토큰의 계정(=회사) id와 다르면 403.
+router = APIRouter(
+    prefix="/api/companies/{company_id}/projects",
+    tags=["company-projects"],
+    dependencies=[Depends(verify_company_access)],
+)
 
 ServiceDep = Annotated[CompanyService, Depends(get_company_service)]
 CompanyIdPath = Annotated[int, Path(description="회사 ID", ge=1)]
 ProjectIdPath = Annotated[int, Path(description="프로젝트 ID", ge=1)]
 
-NOT_FOUND = {404: {"description": "회사 또는 프로젝트를 찾을 수 없음"}}
+AUTH_ERRORS = {
+    401: {"description": "인증 정보가 없거나 유효하지 않음"},
+    403: {"description": "본인 회사의 리소스가 아님"},
+}
+NOT_FOUND = {404: {"description": "회사 또는 프로젝트를 찾을 수 없음"}, **AUTH_ERRORS}
 
 
 @router.post(
@@ -28,7 +37,7 @@ NOT_FOUND = {404: {"description": "회사 또는 프로젝트를 찾을 수 없�
     summary="회사 프로젝트 생성",
     description="회사의 수행 프로젝트(실적)를 등록한다.",
     response_description="생성된 프로젝트",
-    responses={404: {"description": "회사를 찾을 수 없음"}},
+    responses={404: {"description": "회사를 찾을 수 없음"}, **AUTH_ERRORS},
 )
 async def create_project(
     company_id: CompanyIdPath, body: CompanyProjectCreate, service: ServiceDep
@@ -44,7 +53,7 @@ async def create_project(
     summary="회사 프로젝트 목록 조회",
     description="해당 회사의 프로젝트를 ID 오름차순으로 페이징 조회한다.",
     response_description="프로젝트 목록",
-    responses={404: {"description": "회사를 찾을 수 없음"}},
+    responses={404: {"description": "회사를 찾을 수 없음"}, **AUTH_ERRORS},
 )
 async def list_projects(
     company_id: CompanyIdPath,

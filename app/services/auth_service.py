@@ -20,6 +20,8 @@ async def signup(session: AsyncSession, data: SignupRequest) -> Company:
     company = Company(
         email=data.email,
         hashed_password=hash_password(data.password),
+        name=data.name,
+        contact_name=data.contact_name,
     )
     session.add(company)
     await session.commit()
@@ -27,8 +29,8 @@ async def signup(session: AsyncSession, data: SignupRequest) -> Company:
     return company
 
 
-async def login(session: AsyncSession, data: LoginRequest) -> str:
-    """이메일/비밀번호를 검증하고 액세스 토큰을 반환한다.
+async def login(session: AsyncSession, data: LoginRequest) -> tuple[str, Company]:
+    """이메일/비밀번호를 검증하고 (액세스 토큰, 계정)을 반환한다.
 
     이메일이 없거나 비밀번호가 틀리면 동일하게 401을 발생시킨다
     (어느 쪽이 틀렸는지 노출하지 않기 위함).
@@ -41,4 +43,4 @@ async def login(session: AsyncSession, data: LoginRequest) -> str:
     ):
         raise AppException("이메일 또는 비밀번호가 올바르지 않습니다.", status_code=401)
 
-    return create_access_token(subject=company.id)
+    return create_access_token(subject=company.id), company
