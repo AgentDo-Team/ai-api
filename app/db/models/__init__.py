@@ -16,7 +16,6 @@ __all__ = [
     "CompanyProject",
     "SearchSet",
     "HardFilter",
-    "DomainCode",
     "BidNotice",
     "Chunk",
     "AnalysisResult",
