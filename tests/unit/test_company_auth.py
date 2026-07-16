@@ -121,3 +121,8 @@ async def test_본인_회사는_조회_가능(auth_client):
     response = await auth_client.get("/api/companies/1")
     assert response.status_code == 200
     assert response.json()["data"]["id"] == 1
+
+
+async def test_토큰_없이_공고_검색하면_401(anonymous_client):
+    response = await anonymous_client.post("/bid-notices/search", json={})
+    assert response.status_code == 401

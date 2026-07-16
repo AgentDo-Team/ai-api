@@ -41,13 +41,13 @@ class HardFilterCondition(BaseModel):
 class BidSearchRequest(BaseModel):
     """채팅창 공고 검색 요청.
 
-    불러온 입력폼(company_id) + 정형 필터 조건 + 자연어 메시지로 구성된다.
+    정형 필터 조건 + 자연어 메시지로 구성된다. 검색 주체 회사는 요청 본문이 아니라
+    JWT 토큰의 계정(=회사)에서 가져온다 (본인 프로필/프로젝트만 조회 가능하도록).
     - filters: 정형 조건 → 1차 하드 필터링 (SQL WHERE)
     - message: 자연어 강조 메시지 → 자사 프로필/프로젝트와 결합해 즉석 임베딩(쿼리 벡터).
       저장하지 않는 일회성 쿼리로, 2차 소프트 필터링에 사용한다.
     """
 
-    company_id: int = Field(description="검색 주체 회사 ID (불러온 입력폼 기준)")
     filters: HardFilterCondition = Field(default_factory=HardFilterCondition)
     message: str | None = Field(
         default=None,
