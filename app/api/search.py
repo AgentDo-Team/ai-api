@@ -22,7 +22,7 @@ async def search_bid_notices(
     current_account: CurrentAccountDep,
     session: AsyncSession = Depends(get_session),
 ) -> ApiResponse[BidSearchResponse]:
-    """채팅창 공고 검색 (현재 1차 하드 필터링까지). 본인 회사 기준으로 검색한다."""
+    """채팅창 공고 검색: 1차 하드 필터링 + 2차 소프트필터(청크 랭킹). 본인 회사 기준."""
     result = await search_service.search_bid_notices(
         session, current_account.id, request
     )

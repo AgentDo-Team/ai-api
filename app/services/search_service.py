@@ -24,6 +24,7 @@ from app.schemas.search import (
     HardFilterCondition,
 )
 from app.services import embedding_service
+from app.services.second_filter_service import SecondFilterService
 
 # 채팅방 제목 기본값 (자유형식 메시지가 없을 때)
 _DEFAULT_SEARCH_TITLE = "공고 검색"
@@ -127,10 +128,11 @@ async def create_search_session(
 async def search_bid_notices(
     session: AsyncSession, company_id: int, request: BidSearchRequest
 ) -> BidSearchResponse:
-    """공고 검색: 검색 세션 저장 + 1차 하드 필터링.
+    """공고 검색: 검색 세션 저장 + 1차 하드 필터링 + 2차 소프트필터(청크 랭킹).
 
-    company_id는 JWT 토큰에서 검증된 값. request.message는 채팅방 이력용으로
-    저장하며, 소프트 필터링(이후 단계)에서 쿼리 임베딩에도 쓰인다.
+    company_id는 JWT 토큰에서 검증된 값. 흐름: 전송 → 검색세션/필터 저장 →
+    지연 임베딩 → 1차 하드필터 → 2차 소프트필터(개요·요구사항 청크를 자사
+    프로필/프로젝트와 유사도 비교). 2차 결과는 응답 second_filter 에 담겨 3차로 넘어간다.
     """
     search_set = await create_search_session(session, company_id, request)
 
@@ -150,8 +152,31 @@ async def search_bid_notices(
         )
         for notice in notices
     ]
+
+    # 2차 소프트필터 시작 → 검색세트 상태를 진행중으로 갱신(진행 상태 추적용).
+    search_set.status = "ongoing_second_filter"
+    session.add(search_set)
+    await session.commit()
+
+    # 2차 소프트필터: 하드필터 통과 공고를 개요·요구사항 청크 유사도로 랭킹한다.
+    second = SecondFilterService(session)
+    soft_result = await second.run(
+        search_set_id=search_set.id,
+        company_id=company_id,
+        bid_notice_ids=[notice.id for notice in notices],
+        query_text=request.message,
+        top_k=10,  # 공고당 3차로 내려줄 랭킹 청크 수
+    )
+
+    # 공고별 매칭도(aggregate_score)를 soft_score 로 채우고 내림차순 정렬한다.
+    score_by_notice = {r.bid_notice_id: r.aggregate_score for r in soft_result.results}
+    for item in items:
+        item.soft_score = score_by_notice.get(item.bid_notice_id)
+    items.sort(key=lambda item: (item.soft_score or 0.0), reverse=True)
+
     return BidSearchResponse(
         search_set_id=search_set.id,
         hard_filtered_count=len(items),
         items=items,
+        second_filter=soft_result,
     )
