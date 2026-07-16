@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.api.deps import get_company_service
+from app.api.deps import get_company_service, verify_company_access
 from app.db.models.company import Company, CompanyProfile, CompanyProject
 from app.services.company_service import CompanyService
 from main import app
@@ -59,10 +59,6 @@ class _BaseFakeRepo:
 class FakeCompanyRepository(_BaseFakeRepo):
     async def get_by_email(self, email: str) -> Company | None:
         return next((c for c in self.rows.values() if c.email == email), None)
-
-    async def list(self, limit: int = 20, offset: int = 0) -> list[Company]:
-        ordered = sorted(self.rows.values(), key=lambda c: c.id)
-        return ordered[offset : offset + limit]
 
 
 class FakeCompanyProfileRepository(_BaseFakeRepo):
@@ -117,6 +113,9 @@ async def client(session, company_repo, profile_repo, project_repo):
         project_repo=project_repo,
     )
     app.dependency_overrides[get_company_service] = lambda: service
+    # CRUD 로직 검증에 집중하기 위해 JWT 인증(본인 회사 확인)은 우회한다.
+    # 인증 자체의 동작은 tests/unit/test_company_auth.py 에서 검증한다.
+    app.dependency_overrides[verify_company_access] = lambda: None
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as c:
@@ -125,11 +124,29 @@ async def client(session, company_repo, profile_repo, project_repo):
 
 
 @pytest.fixture
-async def company(client) -> dict:
-    """대부분의 테스트가 상위 리소스로 회사 1건을 필요로 한다."""
-    response = await client.post(
-        "/api/companies",
-        json={"name": "에이전트두", "contact_name": "김준혁", "email": "a@agentdo.io"},
+async def company(client, company_repo) -> dict:
+    """대부분의 테스트가 상위 리소스로 회사 1건을 필요로 한다.
+
+    회사 생성 API 는 없고(/auth/signup 이 담당) 저장소에 직접 심는다.
+    """
+    entity = Company(
+        name="에이전트두",
+        contact_name="김준혁",
+        email="a@agentdo.io",
+        hashed_password="fake-hash",
     )
-    assert response.status_code == 201
-    return response.json()["data"]
+    await company_repo.add(entity)
+    return {
+        "id": entity.id,
+        "name": entity.name,
+        "contact_name": entity.contact_name,
+        "email": entity.email,
+    }
+
+
+@pytest.fixture
+async def other_company(client, company_repo) -> dict:
+    """남의 회사 리소스 접근 케이스용 두 번째 회사."""
+    entity = Company(name="다른회사", email="b@x.io", hashed_password="fake-hash")
+    await company_repo.add(entity)
+    return {"id": entity.id, "name": entity.name, "email": entity.email}

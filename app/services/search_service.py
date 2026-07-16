@@ -2,7 +2,8 @@
 
 '전송' 한 번 = 새 검색 세션(채팅방) 시작. 흐름:
   1. SearchSet(채팅방) 생성
-  2. 정형 필터 조건 저장 (HardFilter 1:1 + DomainCode 1:n)
+  2. 정형 필터 조건 저장 (HardFilter 1:1). 도메인 분류코드는 정규화 테이블 없이
+     ProcurementCategory 로 검증된 코드 문자열 하나(HardFilter.domain_code)로 저장한다.
   3. 사용자 메시지 저장 (ChatMessage, role='user') — 채팅방 이력 표시용
   4. 1차 하드 필터링(정형 조건 → bid_notices WHERE)으로 공고 목록 추출
 
@@ -12,6 +13,7 @@
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.core.enums import ProcurementCategory
 from app.db.models.analysis import ChatMessage
 from app.db.models.bid import BidNotice
 from app.db.models.search import HardFilter, SearchSet
@@ -27,6 +29,18 @@ from app.services import embedding_service
 _DEFAULT_SEARCH_TITLE = "공고 검색"
 
 
+def _resolve_domain_name(procurement_clsfc_no: str | None) -> str | None:
+    """공고의 분류코드를 ProcurementCategory 기준 한글명으로 변환한다.
+
+    수집 파이프라인이 20개 화이트리스트 코드만 저장하므로(app/services/bid_service.py의
+    SI_domain_codes) 정상적으로는 항상 매칭되지만, 등록 안 된 코드는 None으로 처리한다.
+    """
+    if procurement_clsfc_no is None:
+        return None
+    member = ProcurementCategory.__members__.get(procurement_clsfc_no)
+    return member.value if member else None
+
+
 def build_hard_filter_query(filters: HardFilterCondition):
     """정형 필터 조건을 bid_notices SELECT 쿼리로 조립한다.
 
@@ -34,9 +48,9 @@ def build_hard_filter_query(filters: HardFilterCondition):
     """
     query = select(BidNotice)
 
-    # 도메인 분류코드: 채팅창 드롭다운이 넘긴 코드들과 매칭 (하나라도 일치)
-    if filters.domain_codes:
-        query = query.where(BidNotice.procurement_clsfc_no.in_(filters.domain_codes))
+    # 도메인 분류코드: 채팅창 드롭다운이 넘긴 코드 하나와 일치
+    if filters.domain_code is not None:
+        query = query.where(BidNotice.procurement_clsfc_no == filters.domain_code)
 
     # 공동수급: 방식명이 채워져 있으면 공동수급 가능 공고로 본다
     if filters.joint_venture is True:
@@ -67,10 +81,11 @@ async def hard_filter_notices(
 
 
 async def create_search_session(
-    session: AsyncSession, request: BidSearchRequest
+    session: AsyncSession, company_id: int, request: BidSearchRequest
 ) -> SearchSet:
     """검색 세션(채팅방)을 생성하고 정형 필터·사용자 메시지를 저장한다.
 
+    company_id는 JWT 토큰에서 검증된 값(요청 본문이 아님)을 그대로 받는다.
     커밋까지 수행하며, id가 채워진 SearchSet을 돌려준다.
     """
     filters = request.filters
@@ -78,28 +93,26 @@ async def create_search_session(
     # 1. 채팅방 생성 — 제목은 자유형식 메시지에서 따오고, 없으면 기본값
     title = request.message.strip() if request.message else ""
     search_set = SearchSet(
-        company_id=request.company_id,
+        company_id=company_id,
         title=(title[:200] or _DEFAULT_SEARCH_TITLE),
     )
     session.add(search_set)
     await session.flush()  # search_set.id 확보 (하위 FK에 필요)
 
-    # 2. 정형 필터 저장 (검색세트:하드필터 = 1:1)
+    # 2. 정형 필터 저장 (검색세트:하드필터 = 1:1). 도메인 코드는 요청 시점에 이미
+    # ProcurementCategory 로 검증된 값이라 그대로 저장한다.
     hard_filter = HardFilter(
         search_set_id=search_set.id,
+        domain_code=filters.domain_code,
         joint_venture=filters.joint_venture,
         budget_min_krw=filters.budget_min_krw,
         budget_max_krw=filters.budget_max_krw,
         deadline=filters.deadline,
     )
     session.add(hard_filter)
-    await session.flush()  # hard_filter.id 확보 (도메인코드 FK에 필요)
+    await session.flush()
 
-    # 3. 도메인 코드 저장 (하드필터:도메인코드 = 1:n). 요청엔 코드만 있어 이름은 비워둔다.
-    for code in filters.domain_codes:
-        session.add(DomainCode(hard_filter_id=hard_filter.id, domain_code=code))
-
-    # 4. 사용자 메시지 저장 (자유형식). 없으면 저장하지 않는다.
+    # 3. 사용자 메시지 저장 (자유형식). 없으면 저장하지 않는다.
     if request.message:
         session.add(
             ChatMessage(
@@ -112,17 +125,17 @@ async def create_search_session(
 
 
 async def search_bid_notices(
-    session: AsyncSession, request: BidSearchRequest
+    session: AsyncSession, company_id: int, request: BidSearchRequest
 ) -> BidSearchResponse:
     """공고 검색: 검색 세션 저장 + 1차 하드 필터링.
 
-    request.message는 채팅방 이력용으로 저장하며, 소프트 필터링(이후 단계)에서
-    쿼리 임베딩에도 쓰인다. company_id도 이후 프로필/프로젝트 조회에 사용한다.
+    company_id는 JWT 토큰에서 검증된 값. request.message는 채팅방 이력용으로
+    저장하며, 소프트 필터링(이후 단계)에서 쿼리 임베딩에도 쓰인다.
     """
-    search_set = await create_search_session(session, request)
+    search_set = await create_search_session(session, company_id, request)
 
     # 지연 임베딩: 아직 임베딩 안 된 자사 프로필/프로젝트를 이 시점에 채운다.
-    await embedding_service.ensure_company_embedded(session, request.company_id)
+    await embedding_service.ensure_company_embedded(session, company_id)
 
     notices = await hard_filter_notices(session, request.filters)
     items = [
@@ -133,6 +146,7 @@ async def search_bid_notices(
             demand_org=notice.demand_org,
             budget_krw=notice.budget_krw,
             bid_deadline=notice.bid_deadline,
+            domain_name=_resolve_domain_name(notice.procurement_clsfc_no),
         )
         for notice in notices
     ]
