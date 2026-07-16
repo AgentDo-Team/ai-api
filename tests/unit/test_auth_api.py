@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.api.auth import get_current_account
 from app.db.models.company import Company
 from app.db.session import get_session
 from main import app
@@ -97,3 +98,20 @@ async def test_중복_이메일은_409(auth_api_client):
     await client.post("/auth/signup", json=SIGNUP_BODY)
     response = await client.post("/auth/signup", json=SIGNUP_BODY)
     assert response.status_code == 409
+
+
+async def test_토큰_없이_로그아웃하면_401(auth_api_client):
+    client, _ = auth_api_client
+    response = await client.post("/auth/logout")
+    assert response.status_code == 401
+    assert response.json()["success"] is False
+
+
+async def test_로그인한_상태에서_로그아웃하면_200(auth_api_client):
+    client, _ = auth_api_client
+    app.dependency_overrides[get_current_account] = lambda: Company(
+        id=1, email="a@agentdo.io"
+    )
+    response = await client.post("/auth/logout")
+    assert response.status_code == 200
+    assert response.json()["success"] is True

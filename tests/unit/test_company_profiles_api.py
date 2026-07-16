@@ -1,12 +1,12 @@
 """/api/companies/{id}/profile 엔드포인트 단위 테스트."""
 
 PROFILE_BODY = {
-    "company_scale": "중소기업",
+    "company_scale": "SMALL",
     "target_techs": "AI, RAG",
     "offered_solutions": "입찰공고 분석 SaaS",
     "strengths_diff": "국방 도메인 경험 다수",
     "credit_rating": "A+",
-    "sp_grade": "1등급",
+    "sp_grade": "1",
 }
 
 
@@ -86,7 +86,7 @@ async def test_update_profile_refreshes_row_after_commit(client, company, sessio
     refreshes_after_create = len(session.refreshed)
 
     response = await client.patch(
-        f"/api/companies/{company['id']}/profile", json={"credit_rating": "AA"}
+        f"/api/companies/{company['id']}/profile", json={"credit_rating": "AA0"}
     )
 
     assert response.status_code == 200

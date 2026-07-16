@@ -43,7 +43,12 @@ class AccountResponse(BaseModel):
 
 
 class TokenResponse(BaseModel):
-    """로그인 성공 시 발급되는 액세스 토큰 응답."""
+    """로그인 성공 시 발급되는 액세스 토큰 응답.
+
+    has_profile: 자사 프로필(입력폼)을 작성했는지 여부.
+    프론트는 로그인 직후 이 값으로 온보딩(입력폼) 화면 vs 채팅 화면을 분기한다.
+    """
 
     access_token: str
     token_type: str = "bearer"
+    has_profile: bool = False
