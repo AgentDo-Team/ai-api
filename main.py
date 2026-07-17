@@ -7,23 +7,6 @@ from app.api.search import router as search_router
 from app.common.exception_handlers import register_exception_handlers
 from app.schemas.response import ApiResponse
 from app.api import bids, companies, company_profiles, company_projects, ingest, proposal, third_filter
-from app.common.exception_handlers import register_exception_handlers
-from app.schemas.response import ApiResponse
-
-
-app = FastAPI(title="ai-api")
-register_exception_handlers(app)
-app.include_router(auth_router)
-app.include_router(profile_router)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # 프론트 주소
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-from app.api import bids, companies, company_profiles, company_projects, ingest, third_filter
 
 OPENAPI_TAGS = [
     {
