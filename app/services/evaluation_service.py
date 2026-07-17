@@ -143,6 +143,7 @@ class EvaluationService:
         async with self.session_factory() as session:
             # 평가 항목과 관련된 청크를 추가로 집어넣고 배점표의 항목이 구체적으로 어떤건지 보완
             # 하이브리드 서치를 통해 상위 5개 청크 가져온다
+            # 이거 지금은 안씀
             search_results = await hybrid_search_chunks(
                 ChunkRepository(session), self.llm, bid_notice_id, query_text, limit=5
             )
@@ -197,6 +198,7 @@ class EvaluationService:
 
     # ------------------------------------------------------------------ #
     # 6단계: K회 반복 후 평균/다수결
+    # 지금은 속도 때문에 해당 반복로직은 작동 안하게 해놨음 ㅠㅠ 
     # ------------------------------------------------------------------ #
 
     async def score_criterion(
@@ -261,11 +263,10 @@ class EvaluationService:
             *[_score(i, criterion) for i, criterion in enumerate(criteria, start=1)]
         )
 
-        # 배점표 항목마다 만점이 30점으로 추출되는 경향이 있어, 원점수 합계는 항목 수에
-        # 비례해 최대치가 달라진다(항목 4개=120점 만점, 6개=180점 만점 등). 프론트/리포트에
-        # 항상 0~100 범위로 보이도록 (항목 수 × 30)을 만점으로 두고 100점 만점으로 정규화한다.
+        # 배점표 항목별 만점은 공고마다 원문 그대로 추출되어 제각각이므로(30점 고정이 아님),
+        # 원점수 합계를 실제 만점 합계로 나눠 0~100 범위로 정규화한다.
         raw_score = sum(r.earned_score for r in results)
-        max_possible = total * 30
+        max_possible = sum(r.criterion.max_score for r in results)
         soft_score = round(raw_score / max_possible * 100) if max_possible > 0 else 0
         chunk_judgments = [
             {
