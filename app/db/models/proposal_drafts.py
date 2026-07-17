@@ -48,11 +48,7 @@ class ProposalDraft(SQLModel, table=True):
         default=None,
         sa_column=Column(String(500))
     )  # 생성된 Word 파일 로컬/보안망 경로
-    
-    pdf_path: Optional[str] = Field(
-        default=None,
-        sa_column=Column(String(500))
-    )  # 생성된 PDF 파일 경로 (추후 고도화용)
+
     
     created_at: Optional[datetime] = Field(
         default=None,
