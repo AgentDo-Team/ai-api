@@ -1,4 +1,8 @@
-import json
+import os
+from pathlib import Path
+import sys
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
 import ollama
 from fastmcp import Client as MCPClient
 
@@ -20,11 +24,11 @@ async def run_agent_loop(mcp_client: MCPClient, user_prompt: str, tool_schemas: 
         {
             "role": "system", 
             "content": """당신은 입찰 제안서 자동화 시스템의 메인 에이전트입니다.
-반드시 제공된 도구(Tools)를 다음 순서대로 호출하여 임무를 완수하세요.
-1. fetch_proposal_context (DB 조회)
-2. generate_draft_json (초안 JSON 작성)
-3. create_and_save_docx (DOCX 생성 및 DB 저장)
-모든 과정이 끝나면 최종 파일 경로를 응답하세요."""
+            반드시 제공된 도구(Tools)를 다음 순서대로 호출하여 임무를 완수하세요.
+            1. fetch_proposal_context (DB 조회)
+            2. generate_draft_json (초안 JSON 작성)
+            3. create_and_save_docx (DOCX 생성 및 DB 저장)
+            모든 과정이 끝나면 최종 파일 경로를 응답하세요."""
         },
         {"role": "user", "content": user_prompt}
     ]
@@ -61,10 +65,12 @@ async def run_agent_loop(mcp_client: MCPClient, user_prompt: str, tool_schemas: 
 
 # FastAPI 라우터에서 호출할 메인 진입점 함수
 async def run_proposal_agent(user_prompt: str) -> str:
-    # ⚠️ 중요: FastAPI가 실행되는 최상위 경로(루트) 기준으로 server.py 위치를 지정해야 합니다.
-    SERVER_CMD = "python app/server.py"
+    # 서버 스크립트의 절대 경로 찾기
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    server_script = os.path.join(current_dir, "server.py")
     
-    mcp_client = MCPClient(SERVER_CMD) 
+    # FastMCP에 서버 스크립트 경로
+    mcp_client = MCPClient(server_script)
     
     async with mcp_client:
         # 서버에서 툴 목록 가져오기
