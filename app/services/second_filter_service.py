@@ -151,7 +151,7 @@ class SecondFilterService:
                 select(CompanyProject).where(
                     CompanyProject.company_id == company_id,
                     CompanyProject.embedding.is_not(None),
-                )
+                ).order_by(CompanyProject.id)
             )
         ).all()
 
@@ -193,7 +193,7 @@ class SecondFilterService:
             texts.add(query_text)
 
         sparse_by_text: dict[str, dict[int, list[tuple[object, float]]]] = {}
-        for txt in texts:
+        for txt in sorted(texts):
             sparse_by_text[txt] = await self.chunk_repo.sparse_search_multi(
                 bid_notice_ids, txt, per_notice_limit=fetch, l_topics=DOMAIN_TOPICS
             )

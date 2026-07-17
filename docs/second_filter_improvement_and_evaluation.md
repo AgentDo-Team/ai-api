@@ -603,29 +603,6 @@ token_count = len(encoding.encode(prompt_text))
 
 `preview` 120자만 세면 안 되고 팀원 2가 실제 LLM에 넣는 전체 청크 본문을 기준으로 계산해야 한다.
 
-### 6.7 최종 평가표 점수 정확성
-
-사람이 직접 채점한 평가표 점수를 정답으로 만든 뒤 팀원 2의 산출 점수와 비교한다.
-
-연속 점수에는 다음 지표를 사용할 수 있다.
-
-```text
-MAE = 평균 |예측 점수 - 사람 점수|
-RMSE = 큰 오차에 더 큰 페널티를 주는 지표
-Spearman 상관계수 = 공고 순위가 사람 순위와 얼마나 일치하는지
-```
-
-예시 합격 기준은 팀 합의가 필요하지만 다음처럼 시작할 수 있다.
-
-```text
-평균 점수 오차 MAE ≤ 5점
-상위 5개 공고 순위 Spearman ≥ 0.8
-핵심 평가항목 누락률 ≤ 5%
-```
-
-이 지표는 팀원 2의 모델 품질도 영향을 주므로 본인의 검색 품질만 평가하려면 동일한 LLM과 프롬프트를
-고정한 상태에서 검색 방식만 바꿔 비교해야 한다.
-
 ## 7. 권장 실험 설계
 
 ### 7.1 1단계: 현재 검색 방식의 기준선
@@ -687,17 +664,63 @@ RRF top-50 → reranker top-10
 최종 nDCG@10이 현재 RRF 대비 향상
 p95 검색 시간 증가 ≤ 30%
 공고당 LLM 입력 토큰이 모델 한도의 70% 이하
-최종 평가표 MAE가 현재 방식보다 감소
 ```
 
 ## 8. 평가 실행 결과 저장 형식
 
+### 8.1 구현된 평가 명령
+
+평가 케이스는 회사 프로필·프로젝트·자유형식 메시지를 고정하고, 하드필터를 통과한 여러 공고를
+하나의 시나리오로 구성한다. 첫 평가 케이스용 다중 공고 라벨링 CSV를 생성한다.
+
+```text
+uv run python -m scripts.evaluation.export_label_candidates --case-id case-001-multi-project --company-id 2 --bid-notice-ids 41,159,75,119,122 --message "AI 플랫폼과 데이터 분석 경험을 우선" --pool-k 20 --output evaluation/labels/case-001-multi-project.csv
+```
+
+CSV의 `notice_relevance`에는 회사와 공고 전체의 관련도 0~3을, `chunk_relevance`에는 공고별 후보
+청크 관련도 0~3을 입력한다. 같은 공고의 모든 행에는 동일한 `notice_relevance`를 넣은 뒤 JSONL로
+변환한다.
+
+```text
+uv run python -m scripts.evaluation.build_cases_from_labels --input evaluation/labels/case-001-multi-project.csv --output evaluation/second_filter_cases.jsonl
+```
+
+Dense only, BM25 only, 현재 RRF 기준선을 실행한다.
+
+```text
+uv run python -m scripts.evaluation.second_filter_benchmark --cases evaluation/second_filter_cases.jsonl --methods dense,bm25,rrf --candidate-k 50 --final-k 10 --warmup 2 --repeat 10 --output-dir evaluation/results
+```
+
+현재 구현된 파일:
+
+| 파일 | 역할 |
+|---|---|
+| `scripts/evaluation/retrieval_metrics.py` | Recall, MRR, nDCG, percentile 계산 |
+| `scripts/evaluation/export_label_candidates.py` | DB 청크를 사람 검토용 CSV로 출력 |
+| `scripts/evaluation/build_cases_from_labels.py` | 라벨 CSV를 평가 JSONL로 변환 |
+| `scripts/evaluation/second_filter_benchmark.py` | Dense/BM25/RRF 실행 및 JSON/CSV 결과 저장 |
+| `evaluation/README.md` | 평가 작업 순서와 명령어 |
+
+`evaluation/labels/case-001-multi-project.csv`에는 실제 프로젝트 1개와 평가용 가상 프로젝트
+3개를 기준으로 공고 41, 159, 75, 119, 122를 같은 회사·메시지로 검색한 Dense/BM25/RRF 후보
+합집합 129개를 내보냈다. 라벨은 의도적으로 비워 두었으며 담당자가
+공고 원문과 회사 입력폼을 함께 읽고 입력해야 한다. `pool-k=20`은 첫 라벨링 작업량을 제한하기 위한
+값이며, 본 평가에서는 50으로 넓히거나 원문에서 누락된 핵심 청크를 직접 추가해야 한다.
+
+CSV와 함께 생성되는 `case-001-multi-project.context.json`에는 실제 비교에 사용한 프로필·프로젝트 텍스트,
+자유형식, 필터, 공고 목록과 임베딩 지문이 저장된다. JSONL 변환 시 이 스냅샷을 평가 케이스에
+포함하고 벤치마크 실행 시 현재 DB 입력과 대조한다. 라벨링 이후 회사 입력폼이 변경됐다면 기존
+라벨을 다른 입력에 잘못 사용하는 것을 막기 위해 평가를 중단한다.
+
+### 8.2 결과 형식
+
+실험 결과에는 공고 순위와 공고별 청크 순위가 함께 저장된다. 청크 지표는 관련 청크가 있는 공고별
+점수를 평균하고, 공고 지표는 하나의 시나리오 안에서 관련 공고가 얼마나 위에 배치됐는지 계산한다.
 실험 결과를 CSV로 남기면 조건 간 비교와 그래프 작성이 쉽다.
 
 ```csv
-run_id,case_id,method,rrf_k,candidate_k,final_k,recall,mrr,ndcg,latency_ms,input_tokens
-20260717-01,case-001,rrf,60,20,10,0.75,0.5,0.82,630,4820
-20260717-02,case-001,rrf_rerank,60,50,10,1.0,1.0,0.94,790,4750
+case_id,method,notice_count,chunk_recall_at_20,chunk_mrr,chunk_ndcg_at_10,notice_mrr,notice_ndcg_at_10,latency_p95_ms,final_token_count
+case-001,rrf,5,0.88,0.72,0.81,1.0,0.91,630,24100
 ```
 
 실험 환경도 함께 기록한다.
