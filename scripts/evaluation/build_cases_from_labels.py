@@ -13,9 +13,20 @@ def build_cases(input_paths: list[Path]) -> list[dict]:
     grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
     contexts: dict[str, dict] = {}
     for path in input_paths:
-        context_path = path.with_suffix(".context.json")
-        if not context_path.exists():
-            context_path = Path("evaluation/labels") / context_path.name
+        context_name = path.with_suffix(".context.json").name
+        context_candidates = [
+            path.with_suffix(".context.json"),
+            Path("evaluation/labels") / context_name,
+        ]
+        if path.stem.endswith("-corrected"):
+            original_name = f"{path.stem.removesuffix('-corrected')}.context.json"
+            context_candidates.extend(
+                [path.with_name(original_name), Path("evaluation/labels") / original_name]
+            )
+        context_path = next(
+            (candidate for candidate in context_candidates if candidate.exists()),
+            context_candidates[-1],
+        )
         if not context_path.exists():
             raise ValueError(f"missing context snapshot: {context_path}")
         context = json.loads(context_path.read_text(encoding="utf-8"))

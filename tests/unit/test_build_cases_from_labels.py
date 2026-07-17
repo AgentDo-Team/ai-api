@@ -55,3 +55,11 @@ def test_rejects_unlabeled_pool_rows(tmp_path):
     write_labels(path, blank_chunk=True)
     with pytest.raises(ValueError, match="chunk_relevance is blank"):
         build_cases([path])
+
+
+def test_corrected_csv_uses_original_context_name(tmp_path):
+    path = tmp_path / "labels-corrected.csv"
+    write_labels(path)
+    path.with_suffix(".context.json").rename(tmp_path / "labels.context.json")
+    [case] = build_cases([path])
+    assert case["case_id"] == "case-1"

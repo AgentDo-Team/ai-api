@@ -41,6 +41,33 @@ CSV에서 다음 두 열을 모두 채운다.
 후보 풀 방식은 어떤 검색법도 찾지 못한 청크를 라벨링하지 못할 수 있다. 중요한 청크가 빠졌다면
 원문에서 직접 추가하거나 `--pool-k 50`으로 후보 풀을 넓힌다.
 
+전체 문서 Recall을 측정하려면 `개요`, `요구사항` 전체 청크를 내보낸다. 기존 129개 라벨은
+`--existing-labels`로 재사용되며 새 청크만 비어 있는 상태로 생성된다.
+
+```text
+uv run python -m scripts.evaluation.export_label_candidates --case-id case-001-full --company-id 2 --bid-notice-ids 41,159,75,119,122 --message "AI 플랫폼과 데이터 분석 경험을 우선" --filters "{}" --pool-k 50 --all-domain-chunks --existing-labels C:\Users\user\Downloads\case-001-multi-project.csv --output evaluation/labels/case-001-full.csv
+```
+
+리랭커 전후 비교용 약 1,000개 평가셋은 하드필터 후보 9개 공고의 전체 청크 1,039개로 구성한다.
+
+```text
+uv run python -m scripts.evaluation.export_label_candidates --case-id case-001-1000 --company-id 2 --bid-notice-ids 41,159,75,119,122,18,16,113,35 --message "AI 플랫폼과 데이터 분석 경험을 우선" --filters "{}" --pool-k 50 --all-domain-chunks --existing-labels C:\Users\user\Downloads\case-001-multi-project.csv --output evaluation/labels/case-001-1000.csv
+```
+
+이 파일은 기존 129개 청크 라벨과 기존 공고 5개의 `notice_relevance`를 재사용한다. 추가 공고 4개의
+`notice_relevance`와 아직 비어 있는 `chunk_relevance` 910개를 작성한 뒤 평가 JSONL로 변환한다.
+
+완료된 전체 라벨 기준선은 다음 경로에 저장한다.
+
+```text
+evaluation/second_filter_cases_1000.jsonl
+evaluation/results/full-1000/<run_id>.json
+evaluation/results/full-1000/<run_id>.csv
+```
+
+2026-07-17 기준 RRF 전체 문서 결과는 Recall@50 `0.782`, MRR `0.800`, nDCG@10 `0.396`,
+p95 `11,128.893ms`다. 기존 129개 후보 풀 결과는 Pooled Recall 참고값으로만 사용한다.
+
 ## 3. 평가 JSONL 생성
 
 ```text
