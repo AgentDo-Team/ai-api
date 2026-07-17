@@ -17,6 +17,8 @@ from app.db.repositories.company_repository import (
     CompanyProjectRepository,
     CompanyRepository,
 )
+from app.db.repositories.analysis_repository import AnalysisResultRepository
+from app.db.repositories.search_set_repository import SearchSetRepository
 from app.db.session import async_session_factory, get_session
 from app.llm.openai_provider import OpenAIProvider
 from app.services.company_service import CompanyService
@@ -46,6 +48,14 @@ def get_company_service(session: SessionDep) -> CompanyService:
         profile_repo=CompanyProfileRepository(session),
         project_repo=CompanyProjectRepository(session),
     )
+
+
+def get_search_set_repository(session: SessionDep) -> SearchSetRepository:
+    return SearchSetRepository(session)
+
+
+def get_analysis_repository(session: SessionDep) -> AnalysisResultRepository:
+    return AnalysisResultRepository(session)
 
 
 def get_third_filter_service() -> ThirdFilterService:

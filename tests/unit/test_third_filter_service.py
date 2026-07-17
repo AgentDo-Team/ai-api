@@ -12,9 +12,11 @@ import pytest
 
 import app.services.third_filter_service as tfs
 from app.common.exceptions import AppException
+from app.core.enums import SearchSetStatus
 from app.db.models.analysis import AnalysisResult
 from app.db.models.bid import BidNotice, Chunk
 from app.db.models.company import CompanyProfile, CompanyProject
+from app.db.models.search import SearchSet
 from app.schemas.third_filter import (
     ChunkFitJudgment,
     FitJudgmentResult,
@@ -134,6 +136,26 @@ class FakeAnalysisResultRepository(_FakeRepoBase):
         return self.rows.get((search_set_id, bid_notice_id))
 
 
+class FakeSearchSetRepository(_FakeRepoBase):
+    """SearchSet.status 갱신 호출만 기록한다(DB 없이)."""
+
+    sets: dict[int, SearchSet] = {}
+    status_history: list[str] = []
+
+    async def get(self, search_set_id: int) -> SearchSet | None:
+        return self.sets.get(search_set_id)
+
+    async def set_status(
+        self, search_set_id: int, status: SearchSetStatus
+    ) -> SearchSet | None:
+        search_set = self.sets.get(search_set_id)
+        if search_set is None:
+            return None
+        search_set.status = status.value
+        self.status_history.append(status.value)
+        return search_set
+
+
 # --------------------------------------------------------------------------- #
 # Fixtures / helpers
 # --------------------------------------------------------------------------- #
@@ -148,11 +170,14 @@ def patch_repos(monkeypatch):
     monkeypatch.setattr(tfs, "CompanyProfileRepository", FakeCompanyProfileRepository)
     monkeypatch.setattr(tfs, "CompanyProjectRepository", FakeCompanyProjectRepository)
     monkeypatch.setattr(tfs, "AnalysisResultRepository", FakeAnalysisResultRepository)
+    monkeypatch.setattr(tfs, "SearchSetRepository", FakeSearchSetRepository)
     FakeBidNoticeRepository.notices = {}
     FakeChunkRepository.chunks = {}
     FakeCompanyProfileRepository.profiles = {}
     FakeCompanyProjectRepository.projects = {}
     FakeAnalysisResultRepository.rows = {}
+    FakeSearchSetRepository.sets = {1: SearchSet(id=1, company_id=1, title="테스트 검색세트")}
+    FakeSearchSetRepository.status_history = []
 
 
 @pytest.fixture
@@ -248,6 +273,23 @@ async def test_final_score_sorting_and_top5_truncation(fake_session, fake_llm):
     assert res.results[0].title == "공고 6"
     assert res.results[0].demand_org == "테스트기관"
     assert res.skipped == []
+
+
+async def test_run_updates_search_set_status_ongoing_then_completed(fake_session, fake_llm):
+    """3차 필터 시작 시 ongoing_third_filter, 끝나면 completed 로 검색세트 상태가 바뀐다."""
+    seed_notice(1)
+    service = make_service(fake_session, fake_llm, {1: 10})
+
+    req = ThirdFilterRequest(
+        search_set_id=1, company_id=1, results=[notice_input(1, aggregate_score=0.5)]
+    )
+    await service.run(req)
+
+    assert tfs.SearchSetRepository.status_history == [
+        SearchSetStatus.ONGOING_THIRD_FILTER.value,
+        SearchSetStatus.COMPLETED.value,
+    ]
+    assert tfs.SearchSetRepository.sets[1].status == SearchSetStatus.COMPLETED.value
 
 
 async def test_aggregate_score_does_not_affect_ranking(fake_session, fake_llm):

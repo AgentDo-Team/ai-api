@@ -226,3 +226,6 @@ docs/notion/
 # Node (npm install 시 생성되는 산출물)
 node_modules/
 npm-debug.log*
+
+#gmail
+gmail_token.json

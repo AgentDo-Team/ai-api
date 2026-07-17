@@ -13,7 +13,7 @@
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.core.enums import ProcurementCategory
+from app.core.enums import ProcurementCategory, SearchSetStatus
 from app.db.models.analysis import ChatMessage
 from app.db.models.bid import BidNotice
 from app.db.models.search import HardFilter, SearchSet
@@ -159,7 +159,7 @@ async def search_bid_notices(
     items = _to_result_items(notices)
 
     # 2차 소프트필터 시작 → 검색세트 상태를 진행중으로 갱신(진행 상태 추적용).
-    search_set.status = "ongoing_second_filter"
+    search_set.status = SearchSetStatus.ONGOING_SECOND_FILTER.value
     session.add(search_set)
     await session.commit()
 

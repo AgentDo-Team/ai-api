@@ -6,7 +6,7 @@ from app.api.auth import router as auth_router
 from app.api.search import router as search_router
 from app.common.exception_handlers import register_exception_handlers
 from app.schemas.response import ApiResponse
-from app.api import bids, companies, company_profiles, company_projects, ingest, third_filter
+from app.api import bids, companies, company_profiles, company_projects, ingest, proposal, third_filter
 
 OPENAPI_TAGS = [
     {
@@ -84,6 +84,7 @@ app.include_router(third_filter.router)
 app.include_router(bids.router)
 app.include_router(ingest.router)
 app.include_router(search_router)
+app.include_router(proposal.router)
 
 
 @app.get("/", tags=["system"], summary="루트")
