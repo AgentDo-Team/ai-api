@@ -24,10 +24,14 @@ async def run_agent_loop(mcp_client: MCPClient, user_prompt: str, tool_schemas: 
         {
             "role": "system", 
             "content": """당신은 입찰 제안서 자동화 시스템의 메인 에이전트입니다.
-            반드시 제공된 도구(Tools)를 다음 순서대로 호출하여 임무를 완수하세요.
-            1. fetch_proposal_context (DB 조회)
-            2. generate_draft_json (초안 JSON 작성)
-            3. create_and_save_docx (DOCX 생성 및 DB 저장)
+            1. 반드시 제공된 도구(Tools)를 다음 순서대로 호출하여 임무를 완수하세요.
+            2. 반드시 fetch_proposal_context를 먼저 호출한다.
+            3. 반환된 JSON 전체를 generate_draft_json의 context_str로 전달한다.
+            4. generate_draft_json이 반환한 JSON 전체를 create_and_save_docx의 draft_json_str로 전달한다.
+            5. 최종 답변은 create_and_save_docx의 결과만 반환한다.
+            6. fetch_proposal_context (DB 조회)
+            7. generate_draft_json (초안 JSON 작성)
+            8. create_and_save_docx (DOCX 생성 및 DB 저장)
             모든 과정이 끝나면 최종 파일 경로를 응답하세요."""
         },
         {"role": "user", "content": user_prompt}
@@ -54,10 +58,12 @@ async def run_agent_loop(mcp_client: MCPClient, user_prompt: str, tool_schemas: 
             
             # MCP 서버에 툴 실행 요청
             tool_result = await mcp_client.call_tool(func_name, args)
-            
+            print(type(tool_result))
+            print(tool_result)
+
             messages.append({
                 "role": "tool",
-                "content": str(tool_result),
+                "content": tool_result.content[0].text,
                 "name": func_name
             })
             
