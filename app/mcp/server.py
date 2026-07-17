@@ -3,8 +3,12 @@ from pathlib import Path
 
 from docx import Document
 from mcp.server.fastmcp import FastMCP
+from app.db.repositories.analysis_repository import AnalysisResultRepository
+from app.db.repositories.bid_respository import BidNoticeRepository
+from app.db.repositories.chunk_repository import ChunkRepository
+from app.db.repositories.company_repository import CompanyRepository
 from app.schemas.proposal import ProposalDraftData, ProposalItem, ProposalReference, RelatedProject
-from tools.proposal import generate_draft
+from app.db.session import async_session_factory
 
 # MCP 서버 초기화
 mcp = FastMCP("ProposalAgentServer")
@@ -13,28 +17,48 @@ mcp = FastMCP("ProposalAgentServer")
 # TOOL 1: DB 조회 (Context 수집)
 # ==========================================
 @mcp.tool()
-def fetch_proposal_context(search_set_id: int, bid_notice_id: int) -> str:
+async def fetch_proposal_context(search_set_id: int, bid_notice_id: int) -> str:
     """[툴1] 검색셋 ID와 공고 ID를 기반으로 DB에서 회사 정보, 공고 정보, 청크(분석결과)를 모두 조회하여 반환합니다."""
     print(f"[Server] 🔍 DB 조회 실행 (search_set_id: {search_set_id}, bid_notice_id: {bid_notice_id})")
     
-    # [설명] 실제 환경에서는 주입받은 Session과 Repository를 사용하여 아래 데이터를 가져옵니다.
-    # search_set = repo.get_search_set(search_set_id)
-    # company_profile = repo.get_company_profile(search_set.company_id)
-    # notice = repo.get_bid_notice(bid_notice_id)
-    # chunks = repo.get_chunks_by_topics(bid_notice_id, ['개요', '추진배경', '현황', '평가기준'])
-    
-    # (테스트용 가상 데이터 반환)
-    context = {
-        "company_name": "아이티센",
-        "company_techs": "AI 에이전트, 클라우드 전환",
-        "notice_title": "공공 클라우드 전환 사업",
-        "demand_org": "한국정보화진흥원",
-        "current_state": "기존 레거시 시스템 노후화 및 유지보수 비용 증가",
-        "requirement": "보안 요건을 충족하는 클라우드 네이티브 아키텍처 구성",
-        "related_project_ids": [101, 102],
-        "chunk_ids": [5, 6, 7]
-    }
-    return json.dumps(context, ensure_ascii=False)
+    # 🚨 변경점 2: FastAPI의 Depends 대신, 여기서 직접 세션을 열고 닫습니다.
+    # async with를 사용하면 블록이 끝날 때 자동으로 session.close()가 호출되어 안전합니다.
+    async with async_session_factory() as session:
+        
+        # 1. 생성한 세션을 Repository에 직접 주입
+        bid_repo = BidNoticeRepository(session)
+        chunk_repo = ChunkRepository(session)
+        analysis_repo = AnalysisResultRepository(session)
+        company_repo = CompanyRepository(session)
+        
+        try:
+            # 2. 실제 DB 쿼리 실행 (await 필수)
+            search_set = await analysis_repo.get_by_search_set_and_notice(search_set_id, bid_notice_id)
+            company_profile = await company_repo.get(search_set.company_id)
+            notice = await bid_repo.get_by_notice_id(bid_notice_id)
+            chunks = await chunk_repo.get_chunks_by_topics(bid_notice_id, ['개요', '평가기준'], ['추진배경', '현황'])
+            
+            # 3. 조회한 데이터를 바탕으로 Context 딕셔너리 조립
+            # context = {
+            #     "company_name": company_profile.name,
+            #     "notice_title": notice.title,
+            #     ...
+            # }
+            
+            # (아래는 임시 가상 데이터)
+            context = {
+                "company_name": "아이티센",
+                "notice_title": "공공 클라우드 전환 사업",
+                "demand_org": "한국정보화진흥원",
+                "related_project_ids": [101, 102],
+                "chunk_ids": [5, 6, 7]
+            }
+            
+            return json.dumps(context, ensure_ascii=False)
+            
+        except Exception as e:
+            print(f"[Server DB Error] {str(e)}")
+            return json.dumps({"error": "DB 조회 중 오류가 발생했습니다."}, ensure_ascii=False)
 
 
 # ==========================================
