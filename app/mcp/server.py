@@ -1,5 +1,9 @@
 import json
 from pathlib import Path
+import sys
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from docx import Document
 from mcp.server.fastmcp import FastMCP
@@ -43,7 +47,7 @@ async def fetch_proposal_context(search_set_id: int, bid_notice_id: int) -> str:
             company_profile = await company_repo.get(search_set.company_id)
             company_projects = await company_project_repo.get_by_company_id(search_set.company_id)
             notice = await bid_repo.get_by_notice_id(bid_notice_id)
-            chunks = await chunk_repo.get_chunks_by_topics(bid_notice_id, ['개요', '평가기준'], ['추진배경', '현황'])
+            chunks = await chunk_repo.get_chunks_by_topics(bid_notice_id, ['개요', '평가기준'], ['추진배경', '현황', '필요성'])
             
             context = {
                 "회사_정보": {
@@ -78,8 +82,6 @@ async def fetch_proposal_context(search_set_id: int, bid_notice_id: int) -> str:
             print(f"[Server DB Error] {str(e)}")
             return json.dumps({"error": "DB 조회 중 오류가 발생했습니다."}, ensure_ascii=False)
     
-    session.close()
-
 
 # ==========================================
 # TOOL 2: 제안서 초안 텍스트 생성 (LLM Worker)
@@ -138,7 +140,7 @@ async def create_and_save_docx(draft_json_str: str, bid_notice_id: int, search_s
         return json.dumps({"error": "LLM이 생성한 JSON 형식이 올바르지 않습니다."}, ensure_ascii=False)
     
     # 2. 샌드박싱된 로컬 폴더 생성
-    secure_dir = Path("C:/Secure_Proposals") # Mac/Linux라면 "/tmp/Secure_Proposals" 
+    secure_dir = Path("/Users/kangminju/Desktop/Secure_Proposals") # Mac/Linux라면 "/tmp/Secure_Proposals" 
     secure_dir.mkdir(parents=True, exist_ok=True)
     file_path = secure_dir / f"Proposal_Draft_Bid_{bid_notice_id}.docx"
     
@@ -190,15 +192,13 @@ async def create_and_save_docx(draft_json_str: str, bid_notice_id: int, search_s
                 docx_path=str(file_path)
             )
             
-            saved_draft = proposal_draft_repo.add(new_draft)
+            saved_draft = await proposal_draft_repo.add(new_draft)
             await session.commit()
             
         except Exception as e:
             await session.rollback() # 에러 발생 시 롤백
             print(f"[Server DB Error] {str(e)}")
             return json.dumps({"error": f"ProposalDraft DB 저장 중 오류가 발생했습니다: {str(e)}"}, ensure_ascii=False)
-    
-    session.close()
     
     return json.dumps({
         "status": "success",
@@ -208,4 +208,4 @@ async def create_and_save_docx(draft_json_str: str, bid_notice_id: int, search_s
 
 
 if __name__ == "__main__":
-    mcp.run(transport='stdio')
+    mcp.run()
