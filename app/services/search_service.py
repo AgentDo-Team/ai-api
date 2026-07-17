@@ -27,7 +27,11 @@ from app.schemas.search import (
     HardFilterCondition,
 )
 from app.services import embedding_service
-from app.services.second_filter_service import SecondFilterService
+from app.services.second_filter_service import (
+    DEFAULT_CANDIDATE_K,
+    DEFAULT_FINAL_K,
+    SecondFilterService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +181,8 @@ async def search_bid_notices(
             company_id=company_id,
             bid_notice_ids=[notice.id for notice in notices],
             query_text=request.message,
-            top_k=10,  # 공고당 3차로 내려줄 랭킹 청크 수
+            candidate_k=DEFAULT_CANDIDATE_K,  # 공고별 RRF 후보 수
+            final_k=DEFAULT_FINAL_K,  # 공고당 3차로 내려줄 최종 랭킹 청크 수
         )
 
     except Exception as exc:

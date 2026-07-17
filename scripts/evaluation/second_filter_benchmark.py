@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from statistics import mean
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 import tiktoken
 from pydantic import BaseModel, Field, model_validator
@@ -26,9 +26,32 @@ from scripts.evaluation.retrieval_metrics import (
     recall_at_k,
     reciprocal_rank,
 )
-from app.services.second_filter_service import DOMAIN_TOPICS, RRF_K, SecondFilterService, _Target
+from app.services.second_filter_service import (
+    DOMAIN_TOPICS,
+    RRF_K,
+    SecondFilterService,
+    _Target,
+    _nearest_target,
+)
 
-Method = Literal["dense", "bm25", "rrf"]
+Method = Literal["dense", "bm25", "rrf", "rrf_bge_onnx_int8"]
+
+
+class PairReranker(Protocol):
+    def load(self) -> None: ...
+
+    def score_pairs(self, pairs: list[tuple[str, str]]) -> list[float]: ...
+
+
+def build_rerank_pair(
+    target_text: str, chunk_text: str, message: str | None
+) -> tuple[str, str]:
+    """Build a retrieval-style (short requirement query, company evidence) pair."""
+    query_parts = []
+    if message and message.strip():
+        query_parts.append(f"User preference: {message.strip()}")
+    query_parts.append(chunk_text.strip())
+    return "\n\n".join(query_parts), target_text.strip()
 
 
 class TargetSnapshot(BaseModel):
@@ -87,6 +110,7 @@ class BenchmarkRow:
     chunk_recall_at_10: float | None
     chunk_recall_at_20: float | None
     chunk_recall_at_50: float | None
+    chunk_candidate_recall: float | None
     chunk_mrr: float | None
     chunk_ndcg_at_10: float | None
     notice_recall_at_5: float
@@ -143,6 +167,7 @@ async def retrieve_scenario(
     method: Method,
     targets: list[_Target],
     candidate_k: int,
+    reranker: PairReranker | None = None,
 ) -> dict[int, Ranking]:
     """Run a retrieval method while preserving production multi-notice batching."""
     fetch = candidate_k * 2
@@ -184,7 +209,72 @@ async def retrieve_scenario(
         rankings[notice_id] = Ranking(
             [item.chunk_id for item in ranked], [item.score for item in ranked]
         )
+
+    if method == "rrf_bge_onnx_int8":
+        if reranker is None:
+            raise ValueError("rrf_bge_onnx_int8 requires a reranker")
+        rankings = await rerank_scenario(
+            service, rankings, targets, message, reranker
+        )
     return rankings
+
+
+async def rerank_scenario(
+    service: SecondFilterService,
+    rankings: dict[int, Ranking],
+    targets: list[_Target],
+    message: str | None,
+    reranker: PairReranker,
+) -> dict[int, Ranking]:
+    """Rerank every RRF candidate against its nearest company input target."""
+    candidate_ids = {
+        chunk_id for ranking in rankings.values() for chunk_id in ranking.chunk_ids
+    }
+    if not candidate_ids:
+        return rankings
+    chunks = list(
+        (
+            await service.session.exec(
+                select(Chunk).where(Chunk.id.in_(candidate_ids))
+            )
+        ).all()
+    )
+    chunk_by_id = {chunk.id: chunk for chunk in chunks}
+    target_by_key = {(target.source, target.id): target for target in targets}
+
+    refs: list[tuple[int, int, int]] = []
+    pairs: list[tuple[str, str]] = []
+    for notice_id, ranking in rankings.items():
+        for original_rank, chunk_id in enumerate(ranking.chunk_ids):
+            chunk = chunk_by_id.get(chunk_id)
+            if chunk is None:
+                continue
+            matched = _nearest_target(chunk.embedding, targets)
+            if matched is None:
+                continue
+            target = target_by_key[matched]
+            refs.append((notice_id, chunk_id, original_rank))
+            pairs.append(
+                build_rerank_pair(target.text, chunk.content or "", message)
+            )
+
+    scores = await asyncio.to_thread(reranker.score_pairs, pairs)
+    if len(scores) != len(refs):
+        raise ValueError("reranker returned a different number of scores")
+
+    by_notice: dict[int, list[tuple[int, float, int]]] = {
+        notice_id: [] for notice_id in rankings
+    }
+    for (notice_id, chunk_id, original_rank), score in zip(refs, scores, strict=True):
+        by_notice[notice_id].append((chunk_id, float(score), original_rank))
+
+    reranked: dict[int, Ranking] = {}
+    for notice_id, items in by_notice.items():
+        ordered = sorted(items, key=lambda item: (-item[1], item[2], item[0]))
+        reranked[notice_id] = Ranking(
+            [item[0] for item in ordered], [item[1] for item in ordered]
+        )
+    return reranked
 
 
 def rank_notices(rankings: dict[int, Ranking], final_k: int) -> tuple[list[int], dict[int, float]]:
@@ -221,6 +311,9 @@ def calculate_metrics(
         if candidate_k >= 20 else None,
         "chunk_recall_at_50": chunk_metric(lambda ids, rel: recall_at_k(ids, rel, 50))
         if candidate_k >= 50 else None,
+        "chunk_candidate_recall": chunk_metric(
+            lambda ids, rel: recall_at_k(ids, rel, candidate_k)
+        ),
         "chunk_mrr": chunk_metric(reciprocal_rank),
         "chunk_ndcg_at_10": chunk_metric(lambda ids, rel: ndcg_at_k(ids, rel, 10)),
         "notice_recall_at_5": recall_at_k(ranked_notice_ids, case.notice_relevance, 5),
@@ -254,6 +347,9 @@ async def benchmark_case(
     final_k: int,
     warmup: int,
     repeat: int,
+    reranker_model_path: Path,
+    reranker_batch_size: int,
+    reranker_max_length: int,
 ) -> BenchmarkRow:
     labeled_chunks = await _load_and_validate_chunks(case)
     async with async_session_factory() as session:
@@ -262,14 +358,40 @@ async def benchmark_case(
         if not targets:
             raise ValueError(f"{case.case_id}: company has no embedded profile/project")
         validate_target_snapshot(case, targets)
+        reranker: PairReranker | None = None
+        if method == "rrf_bge_onnx_int8":
+            from scripts.evaluation.bge_onnx_reranker import BgeOnnxInt8Reranker
+
+            reranker = BgeOnnxInt8Reranker(
+                reranker_model_path,
+                batch_size=reranker_batch_size,
+                max_length=reranker_max_length,
+            )
+            # Model startup is paid once by the application lifespan and is not
+            # part of per-search latency.
+            await asyncio.to_thread(reranker.load)
         for _ in range(warmup):
-            await retrieve_scenario(service, case.bid_notice_ids, case.message, method, targets, candidate_k)
+            await retrieve_scenario(
+                service,
+                case.bid_notice_ids,
+                case.message,
+                method,
+                targets,
+                candidate_k,
+                reranker,
+            )
         latencies: list[float] = []
         rankings: dict[int, Ranking] = {}
         for _ in range(repeat):
             started = time.perf_counter()
             rankings = await retrieve_scenario(
-                service, case.bid_notice_ids, case.message, method, targets, candidate_k
+                service,
+                case.bid_notice_ids,
+                case.message,
+                method,
+                targets,
+                candidate_k,
+                reranker,
             )
             latencies.append((time.perf_counter() - started) * 1000)
 
@@ -321,7 +443,17 @@ async def main_async(args: argparse.Namespace) -> None:
     cases = load_cases(args.cases)
     methods = [method.strip() for method in args.methods.split(",")]
     rows = [
-        await benchmark_case(case, method, args.candidate_k, args.final_k, args.warmup, args.repeat)
+        await benchmark_case(
+            case,
+            method,
+            args.candidate_k,
+            args.final_k,
+            args.warmup,
+            args.repeat,
+            args.reranker_model_path,
+            args.reranker_batch_size,
+            args.reranker_max_length,
+        )
         for case in cases for method in methods
     ]
     json_path, csv_path = write_results(rows, args.output_dir)
@@ -338,6 +470,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--final-k", type=int, default=10)
     parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument("--repeat", type=int, default=10)
+    parser.add_argument(
+        "--reranker-model-path",
+        type=Path,
+        default=Path("evaluation/models/bge-reranker-v2-m3-onnx-int8"),
+    )
+    parser.add_argument("--reranker-batch-size", type=int, default=8)
+    parser.add_argument("--reranker-max-length", type=int, default=512)
     parser.add_argument("--output-dir", type=Path, default=Path("evaluation/results"))
     return parser.parse_args()
 

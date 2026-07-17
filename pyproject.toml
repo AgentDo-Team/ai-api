@@ -32,6 +32,7 @@ dev = [
     "httpx>=0.28.1", # 테스트에서 ASGI 앱에 요청을 보내는 비동기 클라이언트
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "sentence-transformers[onnx]>=5.6.0", # offline second-filter reranker benchmark
 ]
 
 [tool.pytest.ini_options]

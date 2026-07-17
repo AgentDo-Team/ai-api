@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from scripts.evaluation.second_filter_benchmark import (
     EvaluationCase,
     Ranking,
+    build_rerank_pair,
     calculate_metrics,
     embedding_sha256,
     rank_notices,
@@ -45,6 +46,12 @@ def test_rank_notices_uses_sum_of_final_chunk_scores():
     assert scores == {10: pytest.approx(0.5), 20: pytest.approx(0.4)}
 
 
+def test_rerank_pair_uses_requirement_as_query_and_company_as_document():
+    query, document = build_rerank_pair("company evidence", "bid requirement", "AI first")
+    assert query == "User preference: AI first\n\nbid requirement"
+    assert document == "company evidence"
+
+
 def test_metrics_include_notice_and_macro_chunk_quality():
     case = make_case()
     rankings = {
@@ -54,6 +61,7 @@ def test_metrics_include_notice_and_macro_chunk_quality():
     metrics = calculate_metrics(case, rankings, [10, 20], candidate_k=20)
     assert metrics["chunk_recall_at_10"] == pytest.approx(1.0)
     assert metrics["chunk_mrr"] == pytest.approx(0.75)
+    assert metrics["chunk_candidate_recall"] == pytest.approx(1.0)
     assert metrics["notice_mrr"] == pytest.approx(1.0)
     assert metrics["notice_ndcg_at_10"] == pytest.approx(1.0)
     assert metrics["chunk_recall_at_50"] is None

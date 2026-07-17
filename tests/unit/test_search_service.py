@@ -41,10 +41,21 @@ async def _no_notices(session, filters):
 
 
 class FakeSecondFilterService:
+    calls = []
+
     def __init__(self, session) -> None:
         self.session = session
 
-    async def run(self, search_set_id, company_id, bid_notice_ids, query_text, top_k):
+    async def run(
+        self,
+        search_set_id,
+        company_id,
+        bid_notice_ids,
+        query_text,
+        candidate_k,
+        final_k,
+    ):
+        self.calls.append((candidate_k, final_k))
         return SecondFilterResult(
             search_set_id=search_set_id,
             company_id=company_id,
@@ -56,6 +67,7 @@ async def test_search_embeds_once_and_keeps_ongoing_until_third_filter(monkeypat
     search_set = SearchSet(id=7, company_id=1, title="검색")
     session = FakeSession(search_set)
     embed_calls = 0
+    FakeSecondFilterService.calls.clear()
 
     async def embed_once(session, company_id):
         nonlocal embed_calls
@@ -76,6 +88,7 @@ async def test_search_embeds_once_and_keeps_ongoing_until_third_filter(monkeypat
     )
 
     assert embed_calls == 1
+    assert FakeSecondFilterService.calls == [(50, 10)]
     assert result.search_set_id == 7
     assert search_set.status == SearchSetStatus.ONGOING_SECOND_FILTER.value
     assert search_set.failure_reason is None

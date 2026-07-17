@@ -108,7 +108,7 @@ async def test_batch_sparse_requests_domain_topics():
     """_batch_sparse 는 타깃 텍스트 + 메시지를 각각 배치 BM25 로, 도메인 스코프로 검색."""
     service, repo = make_service()
     targets = [profile_target(text="회사 역량 텍스트")]
-    await service._batch_sparse([1, 2], targets, "공공 챗봇", top_k=5)
+    await service._batch_sparse([1, 2], targets, "공공 챗봇", candidate_k=5)
     queries = {c["query_text"] for c in repo.multi_calls}
     assert queries == {"회사 역량 텍스트", "공공 챗봇"}  # 텍스트별 1회씩
     assert all(c["l_topics"] == ["개요", "요구사항"] for c in repo.multi_calls)
@@ -200,6 +200,64 @@ async def test_run_aggregate_and_sort(monkeypatch):
     assert [r.bid_notice_id for r in result.results] == [1, 2]  # 0.5 > 0.1
     assert result.results[0].aggregate_score == pytest.approx(0.5)
     assert result.results[1].aggregate_score == pytest.approx(0.1)
+
+
+async def test_run_separates_candidate_and_final_limits(monkeypatch):
+    service, _repo = make_service()
+    candidate_limits = []
+
+    async def fake_targets(company_id):
+        return [profile_target(text="t")]
+
+    async def fake_rank(
+        bid_notice_id, targets, query_text, candidate_k, sparse_by_text
+    ):
+        from app.schemas.second_filter import RankedChunk
+
+        candidate_limits.append(candidate_k)
+        return [
+            RankedChunk(
+                chunk_id=index,
+                rank=index,
+                score=1.0 / index,
+                matched_source="profile",
+                matched_id=1,
+            )
+            for index in range(1, 51)
+        ]
+
+    monkeypatch.setattr(service, "_load_targets", fake_targets)
+    monkeypatch.setattr(service, "_rank_chunks", fake_rank)
+
+    result = await service.run(
+        search_set_id=7,
+        company_id=1,
+        bid_notice_ids=[1],
+        candidate_k=50,
+        final_k=10,
+    )
+
+    assert candidate_limits == [50]
+    assert len(result.results[0].ranked_chunks) == 10
+    assert [item.chunk_id for item in result.results[0].ranked_chunks] == list(
+        range(1, 11)
+    )
+    assert result.results[0].aggregate_score == pytest.approx(
+        sum(1.0 / index for index in range(1, 11))
+    )
+
+
+async def test_run_rejects_final_limit_larger_than_candidate_limit():
+    service, _repo = make_service()
+
+    with pytest.raises(ValueError, match="final_k must not exceed candidate_k"):
+        await service.run(
+            search_set_id=1,
+            company_id=1,
+            bid_notice_ids=[1],
+            candidate_k=5,
+            final_k=10,
+        )
 
 
 async def test_run_no_targets_returns_empty(monkeypatch):
