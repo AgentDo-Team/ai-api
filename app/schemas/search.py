@@ -98,3 +98,16 @@ class BidSearchResponse(BaseModel):
         default=None,
         description="2차 소프트필터 결과(공고별 랭킹 청크). 3차 필터로 그대로 전달 가능",
     )
+
+
+class SearchSetStatusResponse(BaseModel):
+    """검색세트(채팅방) 분석 진행 상태. 프론트가 폴링으로 조회한다."""
+
+    search_set_id: int
+    status: str | None = Field(
+        default=None,
+        description=(
+            "ongoing_second_filter | ongoing_third_filter | completed. "
+            "값이 없으면(null) 아직 2차 필터가 시작되지 않은 상태."
+        ),
+    )
