@@ -1,12 +1,16 @@
 """3차 필터 오케스트레이션.
 
 흐름:
-1. 입력된 모든 공고를 EvaluationService.evaluate 로 배점표 채점 (공고 간 병렬, 공고별 독립 세션)
-2. final_score(= soft_score) 내림차순 정렬 → 상위 TOP_N 선별
-   (aggregate_score 는 2차 필터가 이미 반영한 매칭도라 최종점수 산정에는 쓰지 않고 참고 정보로만 응답에 포함한다)
-3. 상위 공고만 (a) ranked_chunks ↔ 회사 프로필/프로젝트 적합·부적합 LLM 검증(few-shot, 인용 강제)
+1. aggregate_score(2차 매칭도) 내림차순 상위 CANDIDATE_N 건으로 채점 후보를 좁힌다
+2. 후보 공고를 EvaluationService.evaluate 로 배점표 채점 (공고 간 병렬, 공고별 독립 세션)
+3. final_score(= soft_score) 내림차순 정렬 → 상위 TOP_N 선별
+4. 상위 공고만 (a) ranked_chunks ↔ 회사 프로필/프로젝트 적합·부적합 LLM 검증(few-shot, 인용 강제)
    (b) 공고 내용 100자 요약 을 수행하고 AnalysisResult(recommend_reason/weaknesses/summary)에 저장
-4. 상위 공고 목록 + 처리 제외(skipped) 목록 반환
+5. 상위 공고 목록 + 처리 제외(skipped) 목록 반환
+
+aggregate_score 의 용도: 1단계 후보 선별에만 쓰고, 최종점수(final_score) 산정에는 쓰지 않는다.
+2차 필터가 이미 반영한 매칭도라 점수로 다시 더하면 이중 계산이 되지만, 어느 공고를 채점할지
+고르는 사전 지표로는 유효하다. 응답에는 참고 정보로 그대로 포함한다.
 
 동시성: SQLAlchemy AsyncSession 은 동시 쿼리를 허용하지 않으므로,
 공고 간 병렬화는 공고마다 session_factory 로 새 세션을 열어 처리한다.
@@ -105,6 +109,10 @@ class _ScoredNotice:
 
 class ThirdFilterService:
     TOP_N = 5
+    # 배점표 채점 대상 후보 수. 채점은 공고당 LLM 호출이 수십 회로 가장 비싼 단계인데
+    # 최종 반환은 TOP_N(5) 건뿐이라, aggregate_score 상위 이만큼만 채점한다.
+    # TOP_N 보다 넉넉히 잡아 aggregate_score 와 soft_score 의 순위 차이를 흡수한다.
+    CANDIDATE_N = 10
     MAX_CONCURRENT_NOTICES = 3  # 공고 간 병렬 처리 상한 (LLM/DB 부하 제한)
 
     def __init__(
@@ -130,9 +138,23 @@ class ThirdFilterService:
             req.search_set_id, SearchSetStatus.ONGOING_THIRD_FILTER
         )
 
-        # 1단계: 모든 공고 배점표 채점 (공고별 독립 세션으로 병렬)
+        # 1단계: aggregate_score 상위 CANDIDATE_N 건만 채점 후보로 좁힌다.
+        candidates = sorted(req.results, key=lambda r: r.aggregate_score, reverse=True)[
+            : self.CANDIDATE_N
+        ]
+        logger.info(
+            "[3차] 시작 search_set=%s | 입력 %d건 → 채점 후보 %d건 (aggregate_score 상위)",
+            req.search_set_id,
+            len(req.results),
+            len(candidates),
+        )
+
+        # 2단계: 후보 공고 배점표 채점 (공고별 독립 세션으로 병렬)
         outcomes = await asyncio.gather(
-            *[self._evaluate_notice(req, item) for item in req.results]
+            *[
+                self._evaluate_notice(req, item, i, len(candidates))
+                for i, item in enumerate(candidates, start=1)
+            ]
         )
         scored: list[_ScoredNotice] = []
         for outcome in outcomes:
@@ -141,12 +163,22 @@ class ThirdFilterService:
             else:
                 scored.append(outcome)
 
-        # 2단계: 최종점수(=soft_score) 내림차순 상위 TOP_N
+        # 3단계: 최종점수(=soft_score) 내림차순 상위 TOP_N
         scored.sort(key=lambda s: s.final_score, reverse=True)
         top = scored[: self.TOP_N]
 
-        # 3단계: 상위 공고만 적합/부적합 검증 + 요약 + AnalysisResult 저장
-        verified = await asyncio.gather(*[self._verify_and_summarize(req, s) for s in top])
+        # 4단계: 상위 공고만 적합/부적합 검증 + 요약 + AnalysisResult 저장
+        logger.info(
+            "[3차] 채점 완료 → 상위 %d건 LLM 검증/요약 단계 진입 (notice=%s)",
+            len(top),
+            [s.item.bid_notice_id for s in top],
+        )
+        verified = await asyncio.gather(
+            *[
+                self._verify_and_summarize(req, s, i, len(top))
+                for i, s in enumerate(top, start=1)
+            ]
+        )
         results: list[ThirdFilterNoticeRead] = []
         for item in verified:
             if isinstance(item, SkippedNotice):
@@ -166,13 +198,22 @@ class ThirdFilterService:
             await SearchSetRepository(session).set_status(search_set_id, status)
 
     # ------------------------------------------------------------------ #
-    # 1단계: 공고 1건 채점
+    # 2단계: 공고 1건 채점
     # ------------------------------------------------------------------ #
 
     async def _evaluate_notice(
-        self, req: ThirdFilterRequest, item: NoticeResultIn
+        self, req: ThirdFilterRequest, item: NoticeResultIn, index: int, total: int
     ) -> _ScoredNotice | SkippedNotice:
+        # 세마포어 안에서 로그를 찍어야 실제 분석이 시작되는 시점과 일치한다
+        # (동시 MAX_CONCURRENT_NOTICES 건만 진행하므로 나머지는 여기서 대기한다).
         async with self._semaphore:
+            logger.info(
+                "[채점] 공고 분석 시작 (%d/%d) notice=%s aggregate=%.4f",
+                index,
+                total,
+                item.bid_notice_id,
+                item.aggregate_score,
+            )
             try:
                 async with self.session_factory() as session:
                     service = self.evaluation_service_factory(session, self.llm)
@@ -181,10 +222,25 @@ class ThirdFilterService:
                         bid_notice_id=item.bid_notice_id,
                         company_id=req.company_id,
                     )
-                return _ScoredNotice(item, soft_score=analysis.soft_score or 0)
+                soft_score = analysis.soft_score or 0
+                logger.info(
+                    "[채점] 공고 분석 완료 (%d/%d) notice=%s soft_score=%s",
+                    index,
+                    total,
+                    item.bid_notice_id,
+                    soft_score,
+                )
+                return _ScoredNotice(item, soft_score=soft_score)
             except AppException as e:
                 # 배점표 미발견(404) 등은 부적격이 아니라 '배점표 가점 없음'으로 취급해
                 # soft_score=0(=final_score 최하위)으로 랭킹에는 남긴다(skipped 로 빠뜨리지 않음).
+                logger.info(
+                    "[채점] 공고 채점 불가 (%d/%d) notice=%s soft_score=0 사유=%s",
+                    index,
+                    total,
+                    item.bid_notice_id,
+                    e.message,
+                )
                 return _ScoredNotice(item, soft_score=0, note=e.message)
             except Exception:
                 logger.exception("공고 채점 실패: bid_notice_id=%s", item.bid_notice_id)
@@ -193,16 +249,23 @@ class ThirdFilterService:
                 )
 
     # ------------------------------------------------------------------ #
-    # 3단계: 상위 TOP_N(5) 공고 검증 + 요약 + 저장
+    # 4단계: 상위 TOP_N(5) 공고 검증 + 요약 + 저장
     #   run() 에서 상위 5건에 대해 각각 호출된다(아래 메서드는 공고 1건 단위 처리).
     #   상위 5건 모두 recommend_reason/weaknesses/summary 를 채워 AnalysisResult 에 저장한다.
     # ------------------------------------------------------------------ #
 
     async def _verify_and_summarize(
-        self, req: ThirdFilterRequest, scored: _ScoredNotice
+        self, req: ThirdFilterRequest, scored: _ScoredNotice, index: int, total: int
     ) -> ThirdFilterNoticeRead | SkippedNotice:
         bid_notice_id = scored.item.bid_notice_id
         async with self._semaphore:
+            logger.info(
+                "[검증] 상위 공고 LLM 검증/요약 시작 (%d/%d) notice=%s final_score=%s",
+                index,
+                total,
+                bid_notice_id,
+                scored.final_score,
+            )
             try:
                 async with self.session_factory() as session:
                     bid_notice_repo = BidNoticeRepository(session)

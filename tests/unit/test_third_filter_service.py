@@ -77,8 +77,10 @@ class FakeEvaluationService:
 
     def __init__(self, scores: dict[int, int | AppException]) -> None:
         self.scores = scores
+        self.evaluated: list[int] = []  # 실제 채점된 공고 (후보 컷 검증용)
 
     async def evaluate(self, search_set_id: int, bid_notice_id: int, company_id: int) -> AnalysisResult:
+        self.evaluated.append(bid_notice_id)
         outcome = self.scores[bid_notice_id]
         if isinstance(outcome, AppException):
             raise outcome
@@ -290,6 +292,80 @@ async def test_run_updates_search_set_status_ongoing_then_completed(fake_session
         SearchSetStatus.COMPLETED.value,
     ]
     assert tfs.SearchSetRepository.sets[1].status == SearchSetStatus.COMPLETED.value
+
+
+async def test_candidate_cut_scores_only_top_aggregate_notices(fake_session, fake_llm):
+    """채점은 aggregate_score 상위 CANDIDATE_N 건에만 수행되고, 그 아래는 채점 자체를 건너뛴다."""
+    ids = list(range(1, 13))  # 공고 12건 > CANDIDATE_N(10)
+    for i in ids:
+        seed_notice(i)
+    eval_service = FakeEvaluationService({i: 10 for i in ids})
+    service = ThirdFilterService(
+        session_factory=lambda: FakeSessionCtx(fake_session),
+        llm=fake_llm,
+        evaluation_service_factory=lambda session, llm: eval_service,
+    )
+
+    # 공고 i 의 aggregate_score = i/100 → 상위 10건은 3~12, 하위 2건(1·2)은 컷된다.
+    req = ThirdFilterRequest(
+        search_set_id=1,
+        company_id=1,
+        results=[notice_input(i, aggregate_score=i / 100) for i in ids],
+    )
+    res = await service.run(req)
+
+    assert sorted(eval_service.evaluated) == list(range(3, 13))
+    assert len(eval_service.evaluated) == ThirdFilterService.CANDIDATE_N
+    assert 1 not in eval_service.evaluated and 2 not in eval_service.evaluated
+    # 컷된 공고는 오류가 아니므로 skipped 에도 들어가지 않는다.
+    assert res.skipped == []
+
+
+async def test_candidate_cut_keeps_all_notices_when_under_limit(fake_session, fake_llm):
+    """입력이 CANDIDATE_N 이하면 컷 없이 전부 채점한다."""
+    ids = list(range(1, 5))  # 공고 4건 < CANDIDATE_N(10)
+    for i in ids:
+        seed_notice(i)
+    eval_service = FakeEvaluationService({i: 10 for i in ids})
+    service = ThirdFilterService(
+        session_factory=lambda: FakeSessionCtx(fake_session),
+        llm=fake_llm,
+        evaluation_service_factory=lambda session, llm: eval_service,
+    )
+
+    req = ThirdFilterRequest(
+        search_set_id=1,
+        company_id=1,
+        results=[notice_input(i, aggregate_score=0.5) for i in ids],
+    )
+    await service.run(req)
+
+    assert sorted(eval_service.evaluated) == ids
+
+
+async def test_ranking_within_candidates_still_uses_soft_score(fake_session, fake_llm):
+    """후보 선별은 aggregate_score 로 하지만, 후보 안에서의 순위는 soft_score 로 매긴다."""
+    ids = list(range(1, 13))
+    for i in ids:
+        seed_notice(i)
+    # aggregate 는 i 에 비례(상위 10건 = 3~12), soft_score 는 그 역순.
+    eval_service = FakeEvaluationService({i: (13 - i) * 10 for i in ids})
+    service = ThirdFilterService(
+        session_factory=lambda: FakeSessionCtx(fake_session),
+        llm=fake_llm,
+        evaluation_service_factory=lambda session, llm: eval_service,
+    )
+
+    req = ThirdFilterRequest(
+        search_set_id=1,
+        company_id=1,
+        results=[notice_input(i, aggregate_score=i / 100) for i in ids],
+    )
+    res = await service.run(req)
+
+    # 후보(3~12) 중 soft_score 최상위는 3(=100점), 그 다음 4, 5...
+    assert [r.bid_notice_id for r in res.results] == [3, 4, 5, 6, 7]
+    assert res.results[0].final_score == 100
 
 
 async def test_aggregate_score_does_not_affect_ranking(fake_session, fake_llm):

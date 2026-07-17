@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 
 from app.common.exceptions import AppException
@@ -33,6 +34,8 @@ from app.schemas.evaluation import (
     CriterionScoreResult,
     EvalCriterion,
 )
+
+logger = logging.getLogger(__name__)
 
 _CRITERIA_EXTRACTION_SYSTEM_PROMPT = (
     "너는 공공입찰 RFP의 평가기준표를 분석하는 어시스턴트다. "
@@ -93,14 +96,19 @@ class EvaluationService:
         matched = [c for c in chunks if c.content and is_eval_criteria_table(c.content)]
 
         if matched:
+            logger.info(
+                "  [notice=%s] 배점표 탐지: 공고 청크에서 발견 (청크 %d개)",
+                bid_notice_id,
+                len(matched),
+            )
             joined_text = "\n\n".join(c.content for c in matched if c.content)
         else:
             # 하드 필터가 배점표 청크를 하나도 못 찾은 경우.
             # 임베딩 하이브리드 검색은 결과가 불안정해, 표준 평가표 템플릿을 대체 채점표로 사용한다.
-            print(
-                f"[evaluation] bid_notice_id={bid_notice_id}: "
-                f"적절한 배점표 청크를 찾지 못해 대체 채점표를 사용합니다 "
-                f"(template={_FALLBACK_TEMPLATE_FILENAME})"
+            logger.info(
+                "  [notice=%s] 배점표 탐지: 공고에서 못 찾아 대체 채점표 사용 (template=%s)",
+                bid_notice_id,
+                _FALLBACK_TEMPLATE_FILENAME,
             )
             joined_text = self._load_fallback_template_text()
 
@@ -111,6 +119,9 @@ class EvaluationService:
         )
         if not result.criteria:
             raise AppException("평가기준표에서 세부평가 항목을 분리하지 못했습니다.", status_code=422)
+        logger.info(
+            "  [notice=%s] 평가항목 분리 완료: %d개", bid_notice_id, len(result.criteria)
+        )
         return result.criteria # criteria: list[EvalCriterion]
 
     @staticmethod
@@ -231,13 +242,23 @@ class EvaluationService:
 
         # 항목 병렬 채점 (항목마다 독립 세션이라 동시 실행 안전, 세마포어로 상한 제한)
         semaphore = asyncio.Semaphore(self.MAX_CONCURRENT_CRITERIA)
+        total = len(criteria)
 
-        async def _score(criterion: EvalCriterion) -> CriterionScoreResult:
+        async def _score(index: int, criterion: EvalCriterion) -> CriterionScoreResult:
             async with semaphore:
+                # 세마포어 안에서 찍어야 실제 LLM 요청이 나가는 시점과 일치한다
+                # (밖에서 찍으면 대기 중인 항목까지 한꺼번에 출력된다).
+                logger.info(
+                    "  [notice=%s] 항목 채점 LLM 요청 (%d/%d) %s",
+                    bid_notice_id,
+                    index,
+                    total,
+                    criterion.name,
+                )
                 return await self.score_criterion(bid_notice_id, company_id, criterion)
 
         results: list[CriterionScoreResult] = await asyncio.gather(
-            *[_score(criterion) for criterion in criteria]
+            *[_score(i, criterion) for i, criterion in enumerate(criteria, start=1)]
         )
 
         soft_score = round(sum(r.earned_score for r in results))
