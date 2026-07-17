@@ -16,10 +16,10 @@ class RelatedProject(BaseModel):
     performance: str = Field(description="실적 결과")
 
 class ProposalItem(BaseModel):
-    problem: str = Field(description="제안요청서의 문제 및 요구사항")
-    evaluation_criteria: str = Field(description="관련 평가기준")
-    solution: str = Field(description="자사의 해결방안")
-    differentiation: str = Field(description="타사 대비 차별점")
+    problem: str = Field(description="현재 기관의 문제 및 한계")
+    current_state: str = Field(description="현재 기관의 상황")
+    proposal: str = Field(description="자사의 해결방안")
+    expected_effect: str = Field(description="자사만이 문제를 해결할 수 있는 타사 대비 차별점과 기대효과")
 
 class ProposalDraftData(BaseModel):
     related_projects: List[RelatedProject] = Field(description="관련 성공 프로젝트 목록")
