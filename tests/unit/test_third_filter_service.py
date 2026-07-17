@@ -139,10 +139,11 @@ class FakeAnalysisResultRepository(_FakeRepoBase):
 
 
 class FakeSearchSetRepository(_FakeRepoBase):
-    """SearchSet.status 갱신 호출만 기록한다(DB 없이)."""
+    """SearchSet.status / 진행률 갱신 호출을 기록한다(DB 없이)."""
 
     sets: dict[int, SearchSet] = {}
     status_history: list[str] = []
+    progress_history: list[tuple[int, int]] = []
 
     async def get(self, search_set_id: int) -> SearchSet | None:
         return self.sets.get(search_set_id)
@@ -155,6 +156,20 @@ class FakeSearchSetRepository(_FakeRepoBase):
             return None
         search_set.status = status.value
         self.status_history.append(status.value)
+        return search_set
+
+    async def set_progress(
+        self, search_set_id: int, current: int, total: int
+    ) -> SearchSet | None:
+        search_set = self.sets.get(search_set_id)
+        if search_set is None:
+            return None
+        # 실제 리포지토리와 같은 단조 증가 규칙
+        search_set.progress_current = (
+            0 if current == 0 else max(search_set.progress_current or 0, current)
+        )
+        search_set.progress_total = total
+        self.progress_history.append((current, total))
         return search_set
 
 
@@ -180,6 +195,7 @@ def patch_repos(monkeypatch):
     FakeAnalysisResultRepository.rows = {}
     FakeSearchSetRepository.sets = {1: SearchSet(id=1, company_id=1, title="테스트 검색세트")}
     FakeSearchSetRepository.status_history = []
+    FakeSearchSetRepository.progress_history = []
 
 
 @pytest.fixture
@@ -292,6 +308,61 @@ async def test_run_updates_search_set_status_ongoing_then_completed(fake_session
         SearchSetStatus.COMPLETED.value,
     ]
     assert tfs.SearchSetRepository.sets[1].status == SearchSetStatus.COMPLETED.value
+
+
+async def test_progress_advances_to_total_as_notices_are_scored(fake_session, fake_llm):
+    """진행률이 0/후보수 로 시작해 공고 채점마다 올라 최종 후보수/후보수 에 도달한다."""
+    ids = list(range(1, 13))  # 공고 12건 → 후보 10건
+    for i in ids:
+        seed_notice(i)
+    service = make_service(fake_session, fake_llm, {i: 10 for i in ids})
+
+    req = ThirdFilterRequest(
+        search_set_id=1,
+        company_id=1,
+        results=[notice_input(i, aggregate_score=i / 100) for i in ids],
+    )
+    await service.run(req)
+
+    history = tfs.SearchSetRepository.progress_history
+    assert history[0] == (0, 10)  # 시작 시 0/후보수 로 초기화
+    assert [c for c, _ in history] == list(range(0, 11))  # 0,1,2,...,10 단조 증가
+    assert all(total == 10 for _, total in history)  # 분모는 후보 수로 고정
+    assert tfs.SearchSetRepository.sets[1].progress_current == 10
+    assert tfs.SearchSetRepository.sets[1].progress_total == 10
+
+
+async def test_progress_counts_failed_notices_too(fake_session, fake_llm):
+    """채점 실패/불가 공고도 진행률에 세어, 진행률이 중간에 멈춰 보이지 않는다."""
+    for i in (1, 2, 3):
+        seed_notice(i)
+    scores = {
+        1: 50,
+        2: AppException("평가기준표를 찾을 수 없습니다.", status_code=404),  # 채점 불가
+        3: 30,
+    }
+
+    class Boom(FakeEvaluationService):
+        async def evaluate(self, search_set_id, bid_notice_id, company_id):
+            if bid_notice_id == 3:
+                raise RuntimeError("db down")  # 예상 못한 오류 → skipped
+            return await super().evaluate(search_set_id, bid_notice_id, company_id)
+
+    service = ThirdFilterService(
+        session_factory=lambda: FakeSessionCtx(fake_session),
+        llm=fake_llm,
+        evaluation_service_factory=lambda s, l: Boom(scores),
+    )
+    req = ThirdFilterRequest(
+        search_set_id=1,
+        company_id=1,
+        results=[notice_input(i, 0.5) for i in (1, 2, 3)],
+    )
+    res = await service.run(req)
+
+    assert [s.bid_notice_id for s in res.skipped] == [3]  # 3번은 실패했지만
+    assert tfs.SearchSetRepository.sets[1].progress_current == 3  # 진행률은 3/3 까지 참
+    assert tfs.SearchSetRepository.sets[1].progress_total == 3
 
 
 async def test_candidate_cut_scores_only_top_aggregate_notices(fake_session, fake_llm):

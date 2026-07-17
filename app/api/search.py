@@ -51,6 +51,8 @@ async def get_search_set_status(
     """검색세트(채팅방) 분석 진행 상태 조회. 2차/3차 필터 진행 여부를 프론트가 폴링한다.
 
     status: ongoing_second_filter → ongoing_third_filter → completed 순으로 바뀐다.
+    status=ongoing_third_filter 인 동안에는 progress_current/progress_total 로
+    "공고 몇 건까지 채점했는지"를 함께 내려준다.
     """
     search_set = await search_set_repo.get(search_set_id)
     if search_set is None:
@@ -59,7 +61,12 @@ async def get_search_set_status(
         raise AppException("본인 회사의 검색세트만 조회할 수 있습니다.", status_code=403)
 
     return ApiResponse.ok(
-        data=SearchSetStatusResponse(search_set_id=search_set.id, status=search_set.status)
+        data=SearchSetStatusResponse(
+            search_set_id=search_set.id,
+            status=search_set.status,
+            progress_current=search_set.progress_current,
+            progress_total=search_set.progress_total,
+        )
     )
 
 

@@ -24,7 +24,14 @@ class FakeSearchSetRepository:
 @pytest.fixture
 async def status_client():
     sets = {
-        1: SearchSet(id=1, company_id=1, title="테스트 검색", status="ongoing_third_filter"),
+        1: SearchSet(
+            id=1,
+            company_id=1,
+            title="테스트 검색",
+            status="ongoing_third_filter",
+            progress_current=3,
+            progress_total=10,
+        ),
         2: SearchSet(id=2, company_id=2, title="남의 검색", status="completed"),
     }
     app.dependency_overrides[get_current_account] = lambda: Company(
@@ -39,12 +46,39 @@ async def status_client():
 
 
 async def test_get_status_returns_own_search_set_status(status_client):
+    """3차 필터 진행 중이면 진행률(채점 끝난 공고 수/대상 수)도 함께 내려준다."""
     response = await status_client.get("/bid-notices/search-sets/1/status")
 
     assert response.status_code == 200
     body = response.json()
     assert body["success"] is True
-    assert body["data"] == {"search_set_id": 1, "status": "ongoing_third_filter"}
+    assert body["data"] == {
+        "search_set_id": 1,
+        "status": "ongoing_third_filter",
+        "progress_current": 3,
+        "progress_total": 10,
+    }
+
+
+async def test_get_status_progress_is_null_before_third_filter(status_client):
+    """3차 필터 전(진행률 미기록)에는 progress 필드가 null 로 나간다."""
+    response = await status_client.get("/bid-notices/search-sets/2/status")
+    assert response.status_code == 403  # 2번은 남의 검색세트라 접근 불가
+
+    # 진행률이 없는 본인 검색세트로 다시 확인
+    from app.api.deps import get_search_set_repository
+
+    sets = {3: SearchSet(id=3, company_id=1, title="시작 전", status=None)}
+    app.dependency_overrides[get_search_set_repository] = lambda: FakeSearchSetRepository(sets)
+
+    response = await status_client.get("/bid-notices/search-sets/3/status")
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "search_set_id": 3,
+        "status": None,
+        "progress_current": None,
+        "progress_total": None,
+    }
 
 
 async def test_get_status_rejects_other_companys_search_set(status_client):

@@ -35,3 +35,23 @@ class SearchSetRepository:
         self.session.add(search_set)
         await self.session.commit()
         return search_set
+
+    async def set_progress(
+        self, search_set_id: int, current: int, total: int
+    ) -> SearchSet | None:
+        """3차 필터 진행률(채점 끝난 공고 수/대상 수)을 갱신하고 커밋한다. 없으면 None.
+
+        current 는 뒤로 가지 않는다. 공고를 동시에 채점하는 탓에 완료 순서와 커밋 순서가
+        어긋나 낮은 값이 나중에 도착할 수 있어서다(진행률이 거꾸로 가 보이는 것을 막는다).
+        """
+        search_set = await self.get(search_set_id)
+        if search_set is None:
+            return None
+        if current == 0:  # 시작 시 초기화는 예외적으로 되돌린다
+            search_set.progress_current = 0
+        else:
+            search_set.progress_current = max(search_set.progress_current or 0, current)
+        search_set.progress_total = total
+        self.session.add(search_set)
+        await self.session.commit()
+        return search_set

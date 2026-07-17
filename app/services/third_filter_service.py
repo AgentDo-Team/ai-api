@@ -125,6 +125,9 @@ class ThirdFilterService:
         self.llm = llm
         self.evaluation_service_factory = evaluation_service_factory
         self._semaphore = asyncio.Semaphore(self.MAX_CONCURRENT_NOTICES)
+        # 채점이 끝난 공고 수(진행률 폴링용). 서비스는 요청마다 새로 만들어지고 asyncio 는
+        # 단일 스레드라, 이 카운터는 await 없이 증가시키는 한 경쟁 없이 안전하다.
+        self._completed = 0
 
     # ------------------------------------------------------------------ #
     # 전체 오케스트레이션
@@ -132,16 +135,19 @@ class ThirdFilterService:
 
     async def run(self, req: ThirdFilterRequest) -> ThirdFilterResponse:
         skipped: list[SkippedNotice] = []
-
-        # 3차 필터 시작 → 검색세트 상태를 진행중으로 갱신(폴링용).
-        await self._set_search_set_status(
-            req.search_set_id, SearchSetStatus.ONGOING_THIRD_FILTER
-        )
+        self._completed = 0
 
         # 1단계: aggregate_score 상위 CANDIDATE_N 건만 채점 후보로 좁힌다.
+        # 진행률의 분모가 후보 수라서, 상태를 진행중으로 바꾸기 전에 먼저 확정한다.
         candidates = sorted(req.results, key=lambda r: r.aggregate_score, reverse=True)[
             : self.CANDIDATE_N
         ]
+
+        # 3차 필터 시작 → 상태를 진행중으로, 진행률을 0/후보수 로 초기화(폴링용).
+        await self._set_search_set_status(
+            req.search_set_id, SearchSetStatus.ONGOING_THIRD_FILTER
+        )
+        await self._set_progress(req.search_set_id, 0, len(candidates))
         logger.info(
             "[3차] 시작 search_set=%s | 입력 %d건 → 채점 후보 %d건 (aggregate_score 상위)",
             req.search_set_id,
@@ -197,6 +203,22 @@ class ThirdFilterService:
         async with self.session_factory() as session:
             await SearchSetRepository(session).set_status(search_set_id, status)
 
+    async def _set_progress(self, search_set_id: int, current: int, total: int) -> None:
+        """진행률을 기록한다. 표시용이라 실패해도 채점 파이프라인을 멈추지 않는다."""
+        try:
+            async with self.session_factory() as session:
+                await SearchSetRepository(session).set_progress(
+                    search_set_id, current, total
+                )
+        except Exception:
+            logger.warning(
+                "진행률 갱신 실패 (무시하고 계속): search_set_id=%s %s/%s",
+                search_set_id,
+                current,
+                total,
+                exc_info=True,
+            )
+
     # ------------------------------------------------------------------ #
     # 2단계: 공고 1건 채점
     # ------------------------------------------------------------------ #
@@ -247,6 +269,11 @@ class ThirdFilterService:
                 return SkippedNotice(
                     bid_notice_id=item.bid_notice_id, reason="채점 중 오류가 발생했습니다."
                 )
+            finally:
+                # 성공/채점불가/오류 어느 쪽이든 이 공고는 처리가 끝났다. 셋 다 세어야
+                # 진행률이 끝까지 차오른다(오류 난 공고에서 멈춰 보이지 않게).
+                self._completed += 1
+                await self._set_progress(req.search_set_id, self._completed, total)
 
     # ------------------------------------------------------------------ #
     # 4단계: 상위 TOP_N(5) 공고 검증 + 요약 + 저장
