@@ -261,7 +261,12 @@ class EvaluationService:
             *[_score(i, criterion) for i, criterion in enumerate(criteria, start=1)]
         )
 
-        soft_score = round(sum(r.earned_score for r in results))
+        # 배점표 항목마다 만점이 30점으로 추출되는 경향이 있어, 원점수 합계는 항목 수에
+        # 비례해 최대치가 달라진다(항목 4개=120점 만점, 6개=180점 만점 등). 프론트/리포트에
+        # 항상 0~100 범위로 보이도록 (항목 수 × 30)을 만점으로 두고 100점 만점으로 정규화한다.
+        raw_score = sum(r.earned_score for r in results)
+        max_possible = total * 30
+        soft_score = round(raw_score / max_possible * 100) if max_possible > 0 else 0
         chunk_judgments = [
             {
                 "criterion": r.criterion.name,
