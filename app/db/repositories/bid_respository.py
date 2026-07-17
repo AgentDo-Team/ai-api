@@ -12,6 +12,12 @@ class BidNoticeRepository:
         self.session.add(bid_notice)
         await self.session.flush()
         return bid_notice
+    
+    async def get_by_notice_id(self, notice_id: str) -> BidNotice | None:
+        result = await self.session.exec(
+            select(BidNotice).where(BidNotice.notice_id == notice_id)
+        )
+        return result.first()
 
     async def get_by_notice_no(self, notice_no: str) -> BidNotice | None:
         result = await self.session.exec(
