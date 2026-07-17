@@ -104,8 +104,7 @@ class SecondFilterService:
 
         매칭도(aggregate_score) 내림차순으로 정렬해 돌려준다.
         """
-        # 자사 프로필/프로젝트가 아직 임베딩 안 됐으면 이 시점에 채운다(지연 임베딩, 멱등).
-        await embedding_service.ensure_company_embedded(self.session, company_id)
+        # 회사 입력폼의 지연 임베딩은 상위 검색 오케스트레이션이 한 번만 수행한다.
         targets = await self._load_targets(company_id)
 
         # BM25 는 쿼리당 고정 오버헤드(~150ms)가 커서 공고마다 반복하면 느리다.

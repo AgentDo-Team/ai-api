@@ -26,6 +26,13 @@ async def status_client():
     sets = {
         1: SearchSet(id=1, company_id=1, title="테스트 검색", status="ongoing_third_filter"),
         2: SearchSet(id=2, company_id=2, title="남의 검색", status="completed"),
+        3: SearchSet(
+            id=3,
+            company_id=1,
+            title="실패 검색",
+            status="failed",
+            failure_reason="성공 프로젝트를 하나 이상 작성해 주세요.",
+        ),
     }
     app.dependency_overrides[get_current_account] = lambda: Company(
         id=1, name="에이전트두", email="a@agentdo.io"
@@ -44,7 +51,22 @@ async def test_get_status_returns_own_search_set_status(status_client):
     assert response.status_code == 200
     body = response.json()
     assert body["success"] is True
-    assert body["data"] == {"search_set_id": 1, "status": "ongoing_third_filter"}
+    assert body["data"] == {
+        "search_set_id": 1,
+        "status": "ongoing_third_filter",
+        "failure_reason": None,
+    }
+
+
+async def test_get_status_returns_failure_reason(status_client):
+    response = await status_client.get("/bid-notices/search-sets/3/status")
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "search_set_id": 3,
+        "status": "failed",
+        "failure_reason": "성공 프로젝트를 하나 이상 작성해 주세요.",
+    }
 
 
 async def test_get_status_rejects_other_companys_search_set(status_client):

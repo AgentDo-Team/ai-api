@@ -59,7 +59,11 @@ async def get_search_set_status(
         raise AppException("본인 회사의 검색세트만 조회할 수 있습니다.", status_code=403)
 
     return ApiResponse.ok(
-        data=SearchSetStatusResponse(search_set_id=search_set.id, status=search_set.status)
+        data=SearchSetStatusResponse(
+            search_set_id=search_set.id,
+            status=search_set.status,
+            failure_reason=search_set.failure_reason,
+        )
     )
 
 

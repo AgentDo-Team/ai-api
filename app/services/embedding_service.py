@@ -9,6 +9,7 @@ dense 벡터를 채운다. 한 번 채우면 다음 검색부터는 재사용한
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.common.exceptions import AppException
 from app.db.models.company import CompanyProfile, CompanyProject
 from app.services import embedding_client
 
@@ -45,36 +46,50 @@ def project_text(project: CompanyProject) -> str:
     )
 
 
+def _validate_company_inputs(
+    profile: CompanyProfile | None, projects: list[CompanyProject]
+) -> None:
+    """검색에 필요한 회사 입력폼이 실제 임베딩 가능한 상태인지 검증한다."""
+    if profile is None:
+        raise AppException("회사 프로필을 먼저 작성해 주세요.", status_code=409)
+    if not projects:
+        raise AppException("성공 프로젝트를 하나 이상 작성해 주세요.", status_code=409)
+    if not profile_text(profile).strip():
+        raise AppException(
+            "회사 프로필에 임베딩할 수 있는 내용을 입력해 주세요.", status_code=409
+        )
+    if not any(project_text(project).strip() for project in projects):
+        raise AppException(
+            "성공 프로젝트에 임베딩할 수 있는 내용을 입력해 주세요.", status_code=409
+        )
+
+
 async def ensure_company_embedded(session: AsyncSession, company_id: int) -> int:
     """회사의 미임베딩 프로필/프로젝트를 임베딩해 컬럼을 채운다.
 
     이미 임베딩된(embedding IS NOT NULL) 항목은 건너뛴다.
     임베딩한 항목 수를 반환한다.
     """
-    # 1. 아직 임베딩 안 된 프로필/프로젝트 조회
+    # 1. 회사 입력폼 전체를 조회해 검색 준비 여부를 먼저 검증한다.
     profile = (
         await session.exec(
-            select(CompanyProfile).where(
-                CompanyProfile.company_id == company_id,
-                CompanyProfile.embedding.is_(None),
-            )
+            select(CompanyProfile).where(CompanyProfile.company_id == company_id)
         )
     ).first()
     projects = (
         await session.exec(
-            select(CompanyProject).where(
-                CompanyProject.company_id == company_id,
-                CompanyProject.embedding.is_(None),
-            )
+            select(CompanyProject).where(CompanyProject.company_id == company_id)
         )
     ).all()
+    _validate_company_inputs(profile, list(projects))
 
-    # 2. (대상 객체, 임베딩할 텍스트) 목록 구성. 텍스트가 빈 항목은 제외.
+    # 2. 미임베딩 객체만 대상으로 텍스트를 구성한다.
     targets: list[tuple[CompanyProfile | CompanyProject, str]] = []
-    if profile:
+    if profile.embedding is None:
         targets.append((profile, profile_text(profile)))
     for project in projects:
-        targets.append((project, project_text(project)))
+        if project.embedding is None:
+            targets.append((project, project_text(project)))
     targets = [(obj, text) for obj, text in targets if text.strip()]
 
     if not targets:

@@ -15,7 +15,6 @@ from __future__ import annotations
 import pytest
 
 from app.db.models.bid import Chunk
-from app.services import second_filter_service as sfs
 from app.services.second_filter_service import RRF_K, SecondFilterService, _Target
 
 PROFILE_EMB = [1.0, 0.0]
@@ -65,15 +64,6 @@ class FakeChunkRepo:
     ):
         self.multi_calls.append({"query_text": query_text, "l_topics": l_topics})
         return self.multi.get(query_text, {})
-
-
-@pytest.fixture(autouse=True)
-def no_embedding(monkeypatch):
-    """ensure_company_embedded 가 DB/OpenAI 를 건드리지 않게 무력화."""
-    async def _noop(session, company_id):
-        return 0
-
-    monkeypatch.setattr(sfs.embedding_service, "ensure_company_embedded", _noop)
 
 
 def make_service() -> tuple[SecondFilterService, FakeChunkRepo]:

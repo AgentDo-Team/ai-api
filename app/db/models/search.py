@@ -7,6 +7,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     String,
+    Text,
     func,
 )
 from sqlmodel import Field, SQLModel
@@ -28,6 +29,9 @@ class SearchSet(SQLModel, table=True):
     )  # 어떤 회사의 검색 세트인지
     title: str = Field(max_length=200, nullable=False)  # 검색 세트 제목
     status: str | None = Field(default=None, max_length=40)  # 분석 상태 (Enum)
+    failure_reason: str | None = Field(
+        default=None, sa_column=Column(Text)
+    )  # 실패 상태일 때 사용자에게 보여줄 안전한 사유
     created_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), server_default=func.now(), nullable=False),
