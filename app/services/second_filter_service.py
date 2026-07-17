@@ -23,6 +23,7 @@ import math
 from dataclasses import dataclass
 from collections.abc import Sequence
 
+import numpy as np
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -53,17 +54,17 @@ class _Target:
 
 
 def _cosine_distance(a: Sequence[float], b: Sequence[float]) -> float:
-    """pgvector 와 동일한 코사인 거리(1 - 코사인 유사도). 크기가 0이면 최대 거리(1.0)."""
-    dot = 0.0
-    norm_a = 0.0
-    norm_b = 0.0
-    for x, y in zip(a, b):
-        dot += x * y
-        norm_a += x * x
-        norm_b += y * y
+    """pgvector 와 동일한 코사인 거리(1 - 코사인 유사도). 크기가 0이면 최대 거리(1.0).
+
+    numpy 로 계산한다(1024차원을 파이썬 루프로 돌면 느려 병목이 된다).
+    """
+    va = np.asarray(a, dtype=np.float32)
+    vb = np.asarray(b, dtype=np.float32)
+    norm_a = float(np.linalg.norm(va))
+    norm_b = float(np.linalg.norm(vb))
     if norm_a == 0.0 or norm_b == 0.0:
         return 1.0
-    return 1.0 - dot / (math.sqrt(norm_a) * math.sqrt(norm_b))
+    return 1.0 - float(np.dot(va, vb)) / (norm_a * norm_b)
 
 
 def _nearest_target(
@@ -107,10 +108,18 @@ class SecondFilterService:
         await embedding_service.ensure_company_embedded(self.session, company_id)
         targets = await self._load_targets(company_id)
 
+        # BM25 는 쿼리당 고정 오버헤드(~150ms)가 커서 공고마다 반복하면 느리다.
+        # 쿼리 텍스트별로 전 공고를 한 번에 배치 검색해 그 비용을 최소화한다.
+        sparse_by_text = await self._batch_sparse(
+            bid_notice_ids, targets, query_text, top_k
+        )
+
         results: list[NoticeSoftResult] = []
         for notice_id in bid_notice_ids:
             ranked = (
-                await self._rank_chunks(notice_id, targets, query_text, top_k)
+                await self._rank_chunks(
+                    notice_id, targets, query_text, top_k, sparse_by_text
+                )
                 if targets
                 else []
             )
@@ -168,12 +177,36 @@ class SecondFilterService:
             )
         return targets
 
+    async def _batch_sparse(
+        self,
+        bid_notice_ids: list[int],
+        targets: list[_Target],
+        query_text: str | None,
+        top_k: int,
+    ) -> dict[str, dict[int, list[tuple[object, float]]]]:
+        """쿼리 텍스트별(타깃 텍스트들 + 자유형식 메시지)로 전 공고 BM25 를 배치 검색한다.
+
+        반환: {query_text: {bid_notice_id: [(Chunk, score)]}}. 같은 텍스트는 1회만 검색.
+        """
+        fetch = top_k * 2
+        texts = {target.text for target in targets if target.text.strip()}
+        if query_text and query_text.strip():
+            texts.add(query_text)
+
+        sparse_by_text: dict[str, dict[int, list[tuple[object, float]]]] = {}
+        for txt in texts:
+            sparse_by_text[txt] = await self.chunk_repo.sparse_search_multi(
+                bid_notice_ids, txt, per_notice_limit=fetch, l_topics=DOMAIN_TOPICS
+            )
+        return sparse_by_text
+
     async def _rank_chunks(
         self,
         bid_notice_id: int,
         targets: list[_Target],
         query_text: str | None,
         top_k: int,
+        sparse_by_text: dict[str, dict[int, list[tuple[object, float]]]],
     ) -> list[RankedChunk]:
         """한 공고의 개요·요구사항 청크를 두 층으로 랭킹한다.
 
@@ -182,6 +215,7 @@ class SecondFilterService:
         2층(스티어링): 자유형식 메시지를 BM25 로 한 번 더 검색해 매칭 청크를 가점(soft).
           공고를 제외하지 않고 순위만 끌어올린다.
 
+        BM25 결과는 sparse_by_text 로 미리 배치 계산된 것을 공고별로 꺼내 쓴다.
         모든 순위 리스트를 RRF 로 합산한다. 매칭 타깃(profile/project)은 순위가 아니라
         청크 임베딩과의 실제 코사인 거리로 귀속한다(임베딩 없는 청크는 제외).
         """
@@ -194,7 +228,7 @@ class SecondFilterService:
             chunk_by_id[chunk.id] = chunk
             fused[chunk.id] = fused.get(chunk.id, 0.0) + 1.0 / (RRF_K + rank + 1)
 
-        # 1층: 타깃마다 dense(임베딩) + BM25(텍스트) — 같은 대상을 두 방식으로
+        # 1층: 타깃마다 dense(임베딩, 공고 단위) + BM25(텍스트, 배치 결과 조회)
         for target in targets:
             dense = await self.chunk_repo.dense_search(
                 bid_notice_id, target.embedding, limit=fetch, l_topics=DOMAIN_TOPICS
@@ -203,17 +237,13 @@ class SecondFilterService:
                 fuse(chunk, rank)
 
             if target.text.strip():
-                lexical = await self.chunk_repo.sparse_search(
-                    bid_notice_id, target.text, limit=fetch, l_topics=DOMAIN_TOPICS
-                )
+                lexical = sparse_by_text.get(target.text, {}).get(bid_notice_id, [])
                 for rank, (chunk, _score) in enumerate(lexical):
                     fuse(chunk, rank)
 
         # 2층: 자유형식 메시지 BM25 스티어링(soft 가점) — 매칭 청크 순위만 끌어올림
         if query_text and query_text.strip():
-            steer = await self.chunk_repo.sparse_search(
-                bid_notice_id, query_text, limit=fetch, l_topics=DOMAIN_TOPICS
-            )
+            steer = sparse_by_text.get(query_text, {}).get(bid_notice_id, [])
             for rank, (chunk, _score) in enumerate(steer):
                 fuse(chunk, rank)
 
