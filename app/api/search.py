@@ -22,7 +22,10 @@ async def search_bid_notices(
     current_account: CurrentAccountDep,
     session: AsyncSession = Depends(get_session),
 ) -> ApiResponse[BidSearchResponse]:
-    """채팅창 공고 검색: 1차 하드 필터링 + 2차 소프트필터(청크 랭킹). 본인 회사 기준."""
+    """채팅창 공고 검색: 1차 하드 필터링 + 2차 소프트필터(청크 랭킹). 본인 회사 기준.
+
+    company_id는 요청 본문이 아니라 JWT 토큰의 로그인 계정(=회사)에서 가져온다.
+    """
     result = await search_service.search_bid_notices(
         session, current_account.id, request
     )

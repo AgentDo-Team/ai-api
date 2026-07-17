@@ -31,20 +31,12 @@ VECTOR_INDEXES = (
     "ON eval_criteria_references USING hnsw (embedding vector_cosine_ops)",
 )
 
-# BM25 렉시컬 인덱스 (pg_search v2 API). content 컬럼을 한국어 형태소 분석기(pdb.lindera)로
-# 캐스팅해 색인하고, bid_notice_id 는 필터 푸시다운을 위해 함께 색인한다.
-# dense(HNSW)와 함께 하이브리드 검색을 구성한다.
+# BM25 렉시컬 인덱스 (pg_search). content 를 한국어 형태소 분석기(korean_lindera)로
+# 색인하고, bid_notice_id 를 함께 색인해 공고 필터가 인덱스에 푸시다운되도록 한다
+# (2차 소프트필터의 배치 BM25 검색이 이 인덱스를 쓴다). dense(HNSW)와 함께 하이브리드 구성.
 LEXICAL_INDEXES = (
     """CREATE INDEX IF NOT EXISTS idx_chunks_bm25 ON chunks
-       USING bm25 (id, bid_notice_id, (content::pdb.lindera(korean)))
-       WITH (key_field='id')""",
-)
-
-# BM25 렉시컬 인덱스 (pg_search). content 원문을 한국어 형태소 분석기(korean_lindera)로
-# 색인해 정확 용어 매칭에 사용한다. dense(HNSW)와 함께 하이브리드 검색을 구성.
-LEXICAL_INDEXES = (
-    """CREATE INDEX IF NOT EXISTS idx_chunks_bm25 ON chunks
-       USING bm25 (id, content)
+       USING bm25 (id, content, bid_notice_id)
        WITH (key_field='id', text_fields='{"content":{"tokenizer":{"type":"korean_lindera"}}}')""",
 )
 

@@ -133,8 +133,72 @@ class ChunkRepository:
         if not ranked:
             return []
 
-        chunks = {chunk_id: await self.get(chunk_id) for chunk_id, _ in ranked}
-        return [(chunks[chunk_id], rank) for chunk_id, rank in ranked if chunks[chunk_id] is not None]
+        # 매칭된 청크를 단일 IN 쿼리로 한 번에 조회한다(N+1 방지).
+        chunk_ids = [chunk_id for chunk_id, _ in ranked]
+        fetched = await self.session.exec(select(Chunk).where(Chunk.id.in_(chunk_ids)))
+        chunks = {chunk.id: chunk for chunk in fetched.all()}
+        return [(chunks[cid], rank) for cid, rank in ranked if cid in chunks]
+
+    async def sparse_search_multi(
+        self,
+        bid_notice_ids: list[int],
+        query_text: str,
+        per_notice_limit: int = 10,
+        l_topics: list[str] | None = None,
+    ) -> dict[int, list[tuple[Chunk, float]]]:
+        """여러 공고에 대한 BM25 검색을 단일 쿼리로 수행해 공고별 상위 청크를 돌려준다.
+
+        pg_search BM25 는 쿼리당 고정 오버헤드(~150ms)가 커서, 공고마다 sparse_search 를
+        반복하면 매우 느리다. 윈도우 함수(ROW_NUMBER PARTITION BY bid_notice_id)로
+        공고별 top-k 를 한 번에 뽑아 그 비용을 1회로 줄인다.
+
+        반환: {bid_notice_id: [(Chunk, bm25_score)]} (공고별 점수 내림차순).
+        """
+        if not bid_notice_ids or not query_text or not query_text.strip():
+            return {}
+
+        topic_clause = "AND metadata->>'l_topic' = ANY(:l_topics)" if l_topics else ""
+        rows = (
+            await self.session.execute(
+                text(
+                    f"""
+                    SELECT id, bid_notice_id, score FROM (
+                        SELECT id, bid_notice_id, pdb.score(id) AS score,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY bid_notice_id ORDER BY pdb.score(id) DESC
+                               ) AS rn
+                        FROM chunks
+                        WHERE bid_notice_id = ANY(:ids)
+                          AND content ||| :query_text
+                          {topic_clause}
+                    ) ranked
+                    WHERE rn <= :per_notice_limit
+                    """
+                ),
+                {
+                    "ids": bid_notice_ids,
+                    "query_text": query_text,
+                    "per_notice_limit": per_notice_limit,
+                    **({"l_topics": l_topics} if l_topics else {}),
+                },
+            )
+        ).fetchall()
+        if not rows:
+            return {}
+
+        # 청크 본문을 단일 IN 쿼리로 조회
+        chunk_ids = [row.id for row in rows]
+        fetched = await self.session.exec(select(Chunk).where(Chunk.id.in_(chunk_ids)))
+        chunk_by_id = {chunk.id: chunk for chunk in fetched.all()}
+
+        result: dict[int, list[tuple[Chunk, float]]] = {}
+        for row in rows:
+            chunk = chunk_by_id.get(row.id)
+            if chunk is not None:
+                result.setdefault(row.bid_notice_id, []).append((chunk, row.score))
+        for notice_id in result:  # 공고별 BM25 점수 내림차순 정렬
+            result[notice_id].sort(key=lambda pair: pair[1], reverse=True)
+        return result
 
     async def delete_by_bid_notice(self, bid_notice_id: int) -> None:
         chunks = await self.list_by_bid_notice(bid_notice_id)

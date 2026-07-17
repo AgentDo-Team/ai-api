@@ -125,22 +125,9 @@ async def create_search_session(
     return search_set
 
 
-async def search_bid_notices(
-    session: AsyncSession, company_id: int, request: BidSearchRequest
-) -> BidSearchResponse:
-    """공고 검색: 검색 세션 저장 + 1차 하드 필터링 + 2차 소프트필터(청크 랭킹).
-
-    company_id는 JWT 토큰에서 검증된 값. 흐름: 전송 → 검색세션/필터 저장 →
-    지연 임베딩 → 1차 하드필터 → 2차 소프트필터(개요·요구사항 청크를 자사
-    프로필/프로젝트와 유사도 비교). 2차 결과는 응답 second_filter 에 담겨 3차로 넘어간다.
-    """
-    search_set = await create_search_session(session, company_id, request)
-
-    # 지연 임베딩: 아직 임베딩 안 된 자사 프로필/프로젝트를 이 시점에 채운다.
-    await embedding_service.ensure_company_embedded(session, company_id)
-
-    notices = await hard_filter_notices(session, request.filters)
-    items = [
+def _to_result_items(notices: list[BidNotice]) -> list[BidSearchResultItem]:
+    """공고 목록을 응답 아이템으로 변환한다(soft_score 는 2차에서 채운다)."""
+    return [
         BidSearchResultItem(
             bid_notice_id=notice.id,
             notice_no=notice.notice_no,
@@ -152,6 +139,24 @@ async def search_bid_notices(
         )
         for notice in notices
     ]
+
+
+async def search_bid_notices(
+    session: AsyncSession, company_id: int, request: BidSearchRequest
+) -> BidSearchResponse:
+    """공고 검색: 검색 세션 저장 + 1차 하드필터 + 2차 소프트필터(청크 랭킹).
+
+    company_id는 JWT 토큰에서 검증된 값. 흐름: 전송 → 검색세션/필터 저장 → 지연 임베딩
+    → 1차 하드필터 → 2차 소프트필터(개요·요구사항 청크를 자사 프로필/프로젝트와 유사도
+    비교). 2차 결과는 응답 second_filter 에 담겨 3차로 넘어간다.
+    """
+    search_set = await create_search_session(session, company_id, request)
+
+    # 지연 임베딩: 아직 임베딩 안 된 자사 프로필/프로젝트를 이 시점에 채운다.
+    await embedding_service.ensure_company_embedded(session, company_id)
+
+    notices = await hard_filter_notices(session, request.filters)
+    items = _to_result_items(notices)
 
     # 2차 소프트필터 시작 → 검색세트 상태를 진행중으로 갱신(진행 상태 추적용).
     search_set.status = "ongoing_second_filter"
