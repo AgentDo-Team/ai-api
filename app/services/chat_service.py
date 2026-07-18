@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
@@ -16,10 +18,9 @@ from app.db.repositories.company_repository import (
     CompanyProjectRepository,
 )
 from app.db.repositories.search_set_repository import SearchSetRepository
-from app.schemas.chat import ChatSessionUpdate
 from app.services.embedding_service import profile_text, project_text
 #
-# LLM 체인
+# LLM 체인 관련
 #
 my_template = ChatPromptTemplate.from_messages(
     [
@@ -40,7 +41,9 @@ my_gpt_chain = my_template | gpt_model | parser
 
 _openai_client = AsyncOpenAI(api_key=settings.openai_api_key)
 
-
+#
+# RAG 관련 함수
+#
 async def embedding(text: str) -> list[float]:
     # 질문을 임베딩한다 (랭체인 미사용 버전)
     embed_res = await _openai_client.embeddings.create(
@@ -108,24 +111,10 @@ class ChatService:
     async def list_sessions(self, company_id: int) -> list[SearchSet]:
         return await self.search_set_repo.list_by_company(company_id)
 
-    async def rename_session(
-        self, company_id: int, session_id: int, data: ChatSessionUpdate
-    ) -> SearchSet:
-        search_set = await self._get_owned_session(company_id, session_id)
-        if data.title is not None:
-            search_set.title = data.title
-        await self.search_set_repo.add(search_set)
-        await self.session.commit()
-        return search_set
-    
     async def delete_session(self, company_id: int, session_id: int) -> None:
         search_set = await self._get_owned_session(company_id, session_id)
         await self.search_set_repo.delete(search_set)
         await self.session.commit()
-
-    # ------------------------------------------------------------------ #
-    # 메시지
-    # ------------------------------------------------------------------ #
 
     async def get_messages(
         self, company_id: int, session_id: int
@@ -133,6 +122,10 @@ class ChatService:
         """이전 세션의 대화 내역(이전 세션 연결)."""
         await self._get_owned_session(company_id, session_id)
         return await self.chat_message_repo.list_by_search_set(session_id)
+    
+    #
+    # 채팅 관련
+    # 
 
     async def chat(
         self,
@@ -141,24 +134,18 @@ class ChatService:
         question: str,
         bid_notice_id: int | None = None,
     ) -> ChatMessage:
-        """질문을 저장하고, RAG 로 답변을 생성해 저장한 뒤 assistant 메시지를 반환한다."""
+        # 질문을 저장하고, RAG 로 답변을 생성해 저장한 뒤 assistant 메시지를 반환한다.
         await self._get_owned_session(company_id, session_id)
 
-        # 1) 사용자 질문 저장
-        user_message = ChatMessage(
-            search_set_id=session_id, role="user", content=question
-        )
+        # 1) 사용자 question 디비에 저장
+        user_message = ChatMessage( search_set_id=session_id, role="user", content=question)
         await self.chat_message_repo.add(user_message)
 
-        # 2) RAG 컨텍스트 구성
+        # 2) LLM 질의 시 추가할 문서 청크,회사 정보 구성
         question_embedding = await embedding(question)
         if bid_notice_id is not None:
-            chunks = await dense_search(
-                self.session, bid_notice_id, question_embedding
-            )
+            chunks = await dense_search(self.session, bid_notice_id, question_embedding)
             docs_context = "\n\n".join(c.content or "" for c in chunks) or "(관련 공고 내용 없음)"
-        else:
-            docs_context = "(지정된 공고 없음)"
         company_context = await build_company_context(self.session, company_id)
 
         # 3) 답변 생성 (print 대신 반환값 사용)
@@ -178,3 +165,57 @@ class ChatService:
         await self.session.commit()
         await self.session.refresh(assistant_message)
         return assistant_message
+
+    async def chat_stream(
+        self,
+        company_id: int,
+        session_id: int,
+        question: str,
+        bid_notice_id: int | None = None,
+    ) -> AsyncIterator[dict]:
+        """
+        참고
+        이벤트(dict) 종류:
+        {"type": "delta", "content": <토큰>} — 생성된 부분 문자열
+        {"type": "done",  "message_id": <int>} — 저장 완료된 ai 응답 메시지 id
+        """
+        await self._get_owned_session(company_id, session_id)
+
+        # 1. 사용자 질문 저장
+        user_message = ChatMessage(
+            search_set_id=session_id, role="user", content=question
+        )
+        await self.chat_message_repo.add(user_message)
+
+        # 2. RAG 컨텍스트 구성
+        question_embedding = await embedding(question)
+        if bid_notice_id is not None:
+            chunks = await dense_search(
+                self.session, bid_notice_id, question_embedding
+            )
+            docs_context = "\n\n".join(c.content or "" for c in chunks) or "(관련 공고 내용 없음)"
+        company_context = await build_company_context(self.session, company_id)
+
+        # 3. astream 을 사용하여 답변을 토큰 단위로 스트리밍하며 누적
+        parts: list[str] = []
+        async for token in my_gpt_chain.astream(
+            {
+                "question": question,
+                "docs_context": docs_context,
+                "company_context": company_context,
+            }
+        ):
+            if not token:
+                continue
+            parts.append(token)
+            yield {"type": "delta", "content": token}
+
+        # 4. 답변 저장 후 done 이벤트로 message_id 전달
+        assistant_message = ChatMessage(
+            search_set_id=session_id, role="assistant", content="".join(parts)
+        )
+        await self.chat_message_repo.add(assistant_message)
+        await self.session.commit()
+        await self.session.refresh(assistant_message)
+        # yield로 내보낸 값들은 호출하는 쪽에서 async for로 하나씩 꺼내 씁니다
+        yield {"type": "done", "message_id": assistant_message.id}

@@ -16,14 +16,6 @@ from app.db.models.search import SearchSet
 # --------------------------------------------------------------------------- #
 
 
-class ChatSessionUpdate(BaseModel):
-    """부분 수정. 보낸 필드만 반영된다."""
-
-    title: str | None = Field(
-        default=None, max_length=200, description="채팅 세션 제목"
-    )
-
-
 class ChatSessionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -147,21 +147,6 @@ async def test_list_sessions_scoped_to_company(client, other_session):
     assert res.json()["data"] == []
 
 
-async def test_rename_session(client, session_of_company):
-    res = await client.patch(
-        f"/api/companies/{COMPANY_ID}/chat-sessions/1", json={"title": "이름 변경됨"}
-    )
-    assert res.status_code == 200
-    assert res.json()["data"]["title"] == "이름 변경됨"
-
-
-async def test_rename_other_company_session_404(client, other_session):
-    res = await client.patch(
-        f"/api/companies/{COMPANY_ID}/chat-sessions/99", json={"title": "침범"}
-    )
-    assert res.status_code == 404
-
-
 async def test_delete_session(client, session_of_company, search_set_repo):
     res = await client.delete(f"/api/companies/{COMPANY_ID}/chat-sessions/1")
     assert res.status_code == 200
@@ -230,3 +215,60 @@ async def test_send_message_other_company_404(client, other_session):
         json={"question": "침범"},
     )
     assert res.status_code == 404
+
+
+async def test_send_message_stream_streams_and_persists(
+    client, session_of_company, chat_message_repo, monkeypatch
+):
+    async def fake_embedding(text: str):
+        return [0.0]
+
+    async def fake_build_company_context(session, company_id):
+        return "회사 컨텍스트"
+
+    class FakeChain:
+        async def astream(self, payload):
+            for token in ("안녕", "하세", "요"):
+                yield token
+
+    monkeypatch.setattr(chat_service_module, "embedding", fake_embedding)
+    monkeypatch.setattr(
+        chat_service_module, "build_company_context", fake_build_company_context
+    )
+    monkeypatch.setattr(chat_service_module, "my_gpt_chain", FakeChain())
+
+    body = ""
+    async with client.stream(
+        "POST",
+        f"/api/companies/{COMPANY_ID}/chat-sessions/1/messages/stream",
+        json={"question": "인사해줘"},
+    ) as res:
+        assert res.status_code == 200
+        assert res.headers["content-type"].startswith("text/event-stream")
+        async for chunk in res.aiter_text():
+            body += chunk
+
+    # 토큰이 delta 로, 저장 완료가 done 으로 흘러온다.
+    assert '"type": "delta"' in body
+    assert '"content": "안녕"' in body
+    assert '"type": "done"' in body
+
+    # 스트림이 끝나면 합쳐진 답변이 assistant 메시지로 저장된다.
+    stored = await chat_message_repo.list_by_search_set(1)
+    assert [m.role for m in stored] == ["user", "assistant"]
+    assert stored[1].content == "안녕하세요"
+
+
+async def test_send_message_stream_other_company_error_event(client, other_session):
+    # SSE 는 헤더(200)가 먼저 나가므로, 소유권 실패는 상태코드 대신 error 이벤트로 전달된다.
+    body = ""
+    async with client.stream(
+        "POST",
+        f"/api/companies/{COMPANY_ID}/chat-sessions/99/messages/stream",
+        json={"question": "침범"},
+    ) as res:
+        assert res.status_code == 200
+        async for chunk in res.aiter_text():
+            body += chunk
+    assert '"type": "error"' in body
+    assert '"status": 404' in body

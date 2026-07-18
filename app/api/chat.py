@@ -4,16 +4,18 @@
 JWT 인증 필수. 경로의 company_id 가 토큰의 계정(=회사) id 와 다르면 403.
 """
 
+import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path
+from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_chat_service, verify_company_access
+from app.common.exceptions import AppException
 from app.schemas.chat import (
     ChatMessageRead,
     ChatRequest,
     ChatSessionRead,
-    ChatSessionUpdate,
 )
 from app.schemas.response import ApiResponse
 from app.services.chat_service import ChatService
@@ -46,24 +48,6 @@ async def list_sessions(
 ) -> ApiResponse[list[ChatSessionRead]]:
     sessions = await service.list_sessions(company_id)
     return ApiResponse.ok(data=[ChatSessionRead.of(s) for s in sessions])
-
-
-@router.patch(
-    "/{session_id}",
-    summary="채팅 세션 이름 변경",
-    description="채팅 세션의 제목을 수정한다.",
-    responses=NOT_FOUND,
-)
-async def rename_session(
-    company_id: CompanyIdPath,
-    session_id: SessionIdPath,
-    body: ChatSessionUpdate,
-    service: ServiceDep,
-) -> ApiResponse[ChatSessionRead]:
-    session = await service.rename_session(company_id, session_id, body)
-    return ApiResponse.ok(
-        data=ChatSessionRead.of(session), message="채팅 세션이 수정되었습니다."
-    )
 
 
 @router.delete(
@@ -109,3 +93,44 @@ async def send_message(
         company_id, session_id, body.question, body.bid_notice_id
     )
     return ApiResponse.ok(data=ChatMessageRead.of(message))
+
+
+def _sse(event: dict) -> str:
+    """dict 이벤트를 SSE 한 줄(`data: {json}\\n\\n`)로 직렬화한다."""
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+@router.post(
+    "/{session_id}/messages/stream",
+    summary="챗봇에게 질문 (스트리밍)",
+    description="send_message 와 동일하나, 답변 토큰을 생성되는 대로 SSE(text/event-stream)로 "
+    "흘려보낸다. 이벤트: delta(부분 토큰) → done(저장된 message_id). 오류는 error 이벤트로 온다. "
+    "SSE 스트림이라 다른 엔드포인트와 달리 ApiResponse 로 감싸지 않는다.",
+    responses=NOT_FOUND,
+)
+async def send_message_stream(
+    company_id: CompanyIdPath,
+    session_id: SessionIdPath,
+    body: ChatRequest,
+    service: ServiceDep,
+) -> StreamingResponse:
+    async def event_source():
+        try:
+            async for event in service.chat_stream(
+                company_id, session_id, body.question, body.bid_notice_id
+            ):
+                yield _sse(event)
+        except AppException as exc:
+            # 소유권 실패 등은 스트림 시작 직후 발생한다. HTTP 헤더는 이미 200 이라
+            # 상태코드 대신 error 이벤트(payload)로 전달한다.
+            yield _sse(
+                {"type": "error", "message": exc.message, "status": exc.status_code}
+            )
+        except Exception:
+            yield _sse({"type": "error", "message": "답변 생성에 실패했습니다."})
+
+    return StreamingResponse(
+        event_source(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
