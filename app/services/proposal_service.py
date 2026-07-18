@@ -203,7 +203,6 @@ class ProposalService:
             "{{PROBLEM}}": problem,
             "{{PROPOSAL}}": proposal,
             "{{EXPECTED_EFFECT}}": expected_effect,
-            "{{REFERENCE}}": "자동 생성됨 (DB 참조)"
         }
 
         # --- DOCX 생성 및 저장 ---
@@ -225,7 +224,7 @@ class ProposalService:
             proposal_draft = ProposalDraft(
                 search_set_id=search_set_id,
                 bid_notice_id=bid_notice_id,
-                draft_data=draft_data, # JSONB 필드
+                draft_data=draft_data,
                 docx_path=docx_path
             )
             
