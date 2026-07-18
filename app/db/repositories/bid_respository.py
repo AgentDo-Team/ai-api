@@ -13,9 +13,9 @@ class BidNoticeRepository:
         await self.session.flush()
         return bid_notice
     
-    async def get_by_notice_id(self, notice_id: str) -> BidNotice | None:
+    async def get_by_id(self, id: str) -> BidNotice | None:
         result = await self.session.exec(
-            select(BidNotice).where(BidNotice.notice_id == notice_id)
+            select(BidNotice).where(BidNotice.id == id)
         )
         return result.first()
 
