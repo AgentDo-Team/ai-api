@@ -40,10 +40,6 @@ class ProposalDraft(SQLModel, table=True):
         sa_column=Column(JSONB, nullable=False)
     )  # Pydantic 모델(ProposalDraftData)의 model_dump() 결과가 저장될 JSONB 컬럼
     
-    references: dict = Field(
-        sa_column=Column(JSONB, nullable=False)
-    )  # Pydantic 모델(ProposalReference)의 model_dump() 결과가 저장될 JSONB 컬럼
-    
     docx_path: Optional[str] = Field(
         default=None,
         sa_column=Column(String(500))
