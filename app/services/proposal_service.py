@@ -11,8 +11,6 @@ from app.db.models.proposal_drafts import ProposalDraft
 from app.db.repositories.analysis_repository import AnalysisResultRepository
 from app.db.repositories.proposal_draft_repository import ProposalDraftRepository
 from app.schemas.proposal import ProposalDraftData
-
-# 분리한 Tool 임포트
 from app.tools.proposal_tools import get_company_profile, get_company_projects, get_bid_notice
 
 class ProposalService:
@@ -21,7 +19,7 @@ class ProposalService:
         self.session = session
         self.analysis_repo = AnalysisResultRepository(session)
         self.repo = ProposalDraftRepository(session)
-        self.template_path = Path("app/templates/proposal_template.docx") # 실제 템플릿 경로로 수정
+        self.template_path = Path("app/utils/templates/proposal_template.docx") # 실제 템플릿 경로로 수정
         self.save_dir = Path("/Users/kangminju/Desktop/Secure_Proposals")
 
     async def generate_proposal(self, analysis_result_id: int):
@@ -241,3 +239,47 @@ class ProposalService:
             await self.session.rollback()
             print(f"[Error] DB 저장 실패: {e}")
             raise e
+        
+    async def process_proposal_generation(self, analysis_result_id: int) -> dict:
+        """
+        [통합 파이프라인]
+        1. DB 조회 -> 2. LLM 초안 생성 -> 3. DOCX 파일 생성 -> 4. 결과 DB 저장
+        """
+        # 1. 분석 결과 조회
+        analysis_result = await self.analysis_repo.get(analysis_result_id)
+        if not analysis_result:
+            raise ValueError(f"AnalysisResult {analysis_result_id} not found.")
+
+        # 2. LLM 초안 생성 (JSON 데이터 반환)
+        print("[Service] 1. LLM 제안서 초안(JSON) 생성 시작...")
+        draft_data = await self.generate_draft(analysis_result)
+        
+        # 에러 처리 (생성 실패 시)
+        if "error" in draft_data:
+            raise RuntimeError(f"LLM 제안서 생성 실패: {draft_data['error']}")
+
+        # 3. DOCX 문서 생성 및 로컬 저장
+        print("[Service] 2. DOCX 파일 생성 시작...")
+        docx_path = await self.save_docx(
+            bid_notice_id=analysis_result.bid_notice_id, 
+            draft_data=draft_data
+        )
+
+        # 4. 최종 결과를 DB에 저장
+        print("[Service] 3. 생성 결과 DB 저장 시작...")
+        saved_proposal = await self.save_result(
+            search_set_id=analysis_result.search_set_id,
+            bid_notice_id=analysis_result.bid_notice_id,
+            draft_data=draft_data,
+            docx_path=docx_path
+        )
+
+        print("[Service] ✨ 제안서 파이프라인 전체 완료!")
+        
+        # 5. API로 내려줄 최종 결과 반환
+        return {
+            "proposal_id": saved_proposal.id,
+            "bid_notice_id": analysis_result.bid_notice_id,
+            "docx_path": docx_path,
+            "message": "제안서 초안 생성 및 저장이 완료되었습니다."
+        }
