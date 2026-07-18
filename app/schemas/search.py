@@ -107,7 +107,7 @@ class SearchSetStatusResponse(BaseModel):
     status: str | None = Field(
         default=None,
         description=(
-            "ongoing_second_filter | ongoing_third_filter | completed. "
-            "값이 없으면(null) 아직 2차 필터가 시작되지 않은 상태."
+            "ongoing_second_filter | ongoing_third_filter | ongoing_report_generation | "
+            "completed. 값이 없으면(null) 아직 2차 필터가 시작되지 않은 상태."
         ),
     )

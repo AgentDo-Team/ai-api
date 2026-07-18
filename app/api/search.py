@@ -47,7 +47,9 @@ async def get_search_set_status(
 ) -> ApiResponse[SearchSetStatusResponse]:
     """검색세트(채팅방) 분석 진행 상태 조회. 2차/3차 필터 진행 여부를 프론트가 폴링한다.
 
-    status: ongoing_second_filter → ongoing_third_filter → completed 순으로 바뀐다.
+    status: ongoing_second_filter → ongoing_third_filter → ongoing_report_generation
+    → completed 순으로 바뀐다. ongoing_report_generation 은 상위 공고 선별이 끝나고
+    적합성 분석/요약 리포트를 작성 중인 단계다.
     """
     search_set = await search_set_repo.get(search_set_id)
     if search_set is None:

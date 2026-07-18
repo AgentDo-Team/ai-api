@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     # embedding_dim 은 DB의 Vector(1024) 컬럼과 반드시 일치해야 한다.
     openai_api_key: str = ""
     llm_model: str = "gpt-4o-mini"
+    # 3차 필터의 공고↔회사 적합성 분석 전용 모델. 상위 5건에 대해서만 호출하는(=건수가 적은)
+    # 대신 공고 전체를 통째로 읽고 추천사유/약점을 뽑는 무거운 판단이라 llm_model 과 분리한다.
+    # 배점표 채점은 공고당 수십 회 호출이라 llm_model(저렴한 모델)을 그대로 쓴다.
+    fit_judgment_model: str = "gpt-5.5"
     embedding_model: str = "text-embedding-3-small"
     embedding_dim: int = 1024
 

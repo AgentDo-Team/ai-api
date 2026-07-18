@@ -3,8 +3,9 @@
 요청: 2차 필터(하이브리드 검색) 결과 — 하드필터 통과 공고들과 공고별 상위 청크 매칭 목록.
 응답: 최종점수(aggregate_score + soft_score) 상위 5개 공고의 채점/판정/요약 결과.
 
-ChunkFitJudgment/FitJudgmentResult/NoticeSummaryResult 는 LLM structured output
-타겟으로도 그대로 쓰인다(LLMProvider.complete_structured(response_model=...)).
+FitReason/NoticeFitAnalysis/NoticeSummaryResult 는 LLM structured output 타겟으로도 그대로
+쓰인다 (NoticeFitAnalysis 는 공고 1건당 1회 요청을 상위 5건 묶어 보내므로
+LLMProvider.complete_structured_batch, NoticeSummaryResult 는 complete_structured 로 호출).
 """
 
 from __future__ import annotations
@@ -45,29 +46,51 @@ class ThirdFilterRequest(BaseModel):
 # --------------------------------------------------------------------------- #
 
 
-class ChunkFitJudgment(BaseModel):
-    """공고 청크 ↔ 회사 프로필/프로젝트 매칭 1건에 대한 적합/부적합 판정.
+class FitReason(BaseModel):
+    """공고 ↔ 회사 적합성 분석 항목 1건. recommend_reason/weaknesses 는 이 항목의 리스트다.
 
-    verdict="fit" 인데 cited_source="none" 인 응답은 서비스 레이어가 unfit 으로
-    강제 보정한다 (LLM 이 근거 없이 적합 판정을 지어내는 것을 방지).
+    LLM structured output 타겟이자 그대로 API 응답/DB(JSONB) 형태로도 쓰인다.
+
+    grounding 이 근거의 강도를 나타낸다:
+    - "cited": 프로필/프로젝트의 특정 필드를 인용해 뒷받침되는 항목. cited_source/cited_id/
+      cited_field 가 실제 값을 가리킨다.
+    - "inferred": 인용할 필드는 없지만 공고 요구사항과 회사 정보를 견줘 도출한 항목
+      (예: "공고가 요구하는 클라우드 전환 실적이 프로필·프로젝트 어디에도 없음").
+      근거 부재 자체가 관찰인 경우가 대부분이라 weaknesses 에서 특히 많이 나온다.
+
+    grounding="cited" 인데 cited_source="none" 인 응답은 서비스 레이어가 "inferred" 로
+    강제 보정한다 (LLM 이 인용 없이 인용한 척하는 것을 방지).
     """
 
-    chunk_id: int = Field(description="판정 대상 청크 ID")
-    verdict: Literal["fit", "unfit"]
+    chunk_id: int | None = Field(
+        default=None, description="근거가 된 공고 청크 ID(특정할 수 없으면 None)"
+    )
+    reason: str = Field(description="판정 이유(한국어 1~2문장)")
+    grounding: Literal["cited", "inferred"] = Field(
+        default="inferred",
+        description="근거 강도. cited=프로필/프로젝트 필드 인용, inferred=정황 추론",
+    )
     cited_source: Literal["profile", "project", "none"] = Field(
-        description="근거로 인용한 출처. 근거가 없으면 none"
+        description="근거로 인용한 출처. 인용할 근거가 없으면 none"
     )
     cited_id: int | None = Field(default=None, description="인용한 프로필/프로젝트 ID")
     cited_field: str | None = Field(
         default=None, description="근거가 된 필드명(예: performance, tech_stack)"
     )
-    reason: str = Field(description="판정 이유(한국어 1~2문장)")
 
 
-class FitJudgmentResult(BaseModel):
-    """공고 1건의 ranked_chunks 전체에 대한 일괄 판정 LLM 출력."""
+class NoticeFitAnalysis(BaseModel):
+    """공고 1건의 청크 전체 ↔ 회사 프로필/프로젝트 전체를 견준 적합성 분석 LLM 출력.
 
-    judgments: list[ChunkFitJudgment]
+    청크별 fit/unfit 을 따로 묻지 않고 공고를 통째로 읽혀 추천사유/약점을 뽑는다.
+    """
+
+    recommend_reason: list[FitReason] = Field(
+        description="이 공고에 참여할 만한 이유(최대 5개)"
+    )
+    weaknesses: list[FitReason] = Field(
+        description="이 공고에서 불리하거나 부족한 점(최대 5개)"
+    )
 
 
 class NoticeSummaryResult(BaseModel):
@@ -77,20 +100,6 @@ class NoticeSummaryResult(BaseModel):
 # --------------------------------------------------------------------------- #
 # 응답 DTO
 # --------------------------------------------------------------------------- #
-
-
-class FitReason(BaseModel):
-    """적합/부적합 판정 이유 1건. recommend_reason/weaknesses 는 이 항목의 리스트다."""
-
-    chunk_id: int | None = Field(default=None, description="판정 대상 청크 ID(배점표 채점 실패 사유면 None)")
-    reason: str = Field(description="판정 이유(한국어 1~2문장)")
-    cited_source: Literal["profile", "project", "none"] = Field(
-        description="근거로 인용한 출처. 근거가 없으면 none"
-    )
-    cited_id: int | None = Field(default=None, description="인용한 프로필/프로젝트 ID")
-    cited_field: str | None = Field(
-        default=None, description="근거가 된 필드명(예: performance, tech_stack)"
-    )
 
 
 class ThirdFilterNoticeRead(BaseModel):
