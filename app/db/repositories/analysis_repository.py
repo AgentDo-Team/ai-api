@@ -17,6 +17,9 @@ class AnalysisResultRepository:
         self.session.add(analysis_result)
         await self.session.flush()
         return analysis_result
+    
+    async def get(self, analysis_result_id: int) -> AnalysisResult | None:
+        return await self.session.get(AnalysisResult, analysis_result_id)
 
     async def list_by_search_set(
         self, search_set_id: int, limit: int = 5

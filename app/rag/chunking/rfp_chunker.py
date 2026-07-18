@@ -101,79 +101,82 @@ def slice_rfp_by_headers(raw_text: str, doc_structure: DocumentStructure):
 
 # 단락 기호 별 분리
 def refine_chunks_by_bullets_and_tables(chunks: list, bullet_hierarchy: list) -> list:
-    """
-    1차로 헤더별로 잘린 청크들을 입력받아,
-    단락 기호(□,  등)와 <table> 태그를 기준으로 2차 분할합니다.
-    """
+    STANDARD_BULLET_PATTERNS = [
+        (r"[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+\.", "로마자"),
+        (r"\d{1,2}\.", "숫자"),
+        (r"[가-하]\.", "한글"),
+        (r"\d{1,2}\)", "반괄호 숫자"),
+        (r"[가-하]\)", "반괄호 한글"),
+        (r"\(\d{1,2}\)", "양괄호 숫자"),
+        (r"\([가-하]\)", "양괄호 한글"),
+        (r"[①-⑳]", "원문자"),
+        (r"[□■]", "네모"),
+        (r"[○●◦ㅇ]", "원")
+    ]
+
     refined_chunks = []
-    
-    # 💡 동적 분할 기준 설정: 문서에서 가장 많이 쓰인 최상위 단락 기호 1~2개 추출 (예: '□', '○')
-    # 특수기호가 아닌 일반 텍스트(예: 1., 가.)도 이스케이프 처리하여 정규식에 안전하게 사용
-    top_bullets = bullet_hierarchy[:2] if len(bullet_hierarchy) >= 2 else bullet_hierarchy
-    escaped_bullets = [re.escape(b) for b in top_bullets]
-    
-    # 정규식 설명: 줄 시작 부분에 공백이나 마크다운(#)이 올 수 있고, 그 뒤에 지정된 단락 기호가 오는 경우 매칭
-    bullet_pattern = re.compile(rf"^\s*(?:#+\s*)?({'|'.join(escaped_bullets)})\s+")
 
     for chunk in chunks:
-        l_topic = chunk['l_topic']
-        s_topic = chunk['s_topic']
-        content = chunk['content']
-
+        l_topic, s_topic, content = chunk['l_topic'], chunk['s_topic'], chunk['content']
         lines = content.split('\n')
-        current_sub_content = []
-        in_table = False
 
-        # 내부 헬퍼 함수: 현재까지 모인 텍스트를 하나의 청크로 저장하고 버퍼를 비움
+        # 최상위 기호 결정
+        top_bullet_name, split_bullet_pattern = 'None', None
+        for pat, name in STANDARD_BULLET_PATTERNS:
+            regex = re.compile(rf"^\s*{pat}")
+            # 헤더(#) 라인이 아닌 줄에서만 기호 탐색
+            if any(regex.search(line) for line in lines if not line.strip().startswith('#')):
+                split_bullet_pattern = regex
+                top_bullet_name = name
+                break
+
+        current_sub_content = []
+        table_depth = 0
+
         def save_sub_chunk(text_lines):
             text = "\n".join(text_lines).strip()
             if text:
                 refined_chunks.append({
-                    "l_topic": l_topic,
-                    "s_topic": s_topic,
-                    "content": text
+                    "l_topic": l_topic, "s_topic": s_topic,
+                    "content": text, "top_bul": top_bullet_name
                 })
             text_lines.clear()
 
         for line in lines:
             clean_line = line.strip()
 
-            # ----------------------------------
-            # 1. <table> 분리 로직
-            # ----------------------------------
+            # 1. 테이블 시작/종료 처리 (depth 추적)
             if "<table>" in clean_line:
-                # 테이블이 시작되기 전까지 모인 내용을 먼저 저장! (테이블과 섞이지 않게)
-                save_sub_chunk(current_sub_content)
-                in_table = True
+                if table_depth == 0:
+                    save_sub_chunk(current_sub_content)
+                table_depth += 1
                 current_sub_content.append(line)
                 continue
-
+            
             if "</table>" in clean_line:
                 current_sub_content.append(line)
-                in_table = False
-                # 테이블이 끝났으므로 오직 테이블 내용만 담긴 독립 청크로 즉시 저장!
-                save_sub_chunk(current_sub_content)
+                table_depth = max(0, table_depth - 1)
+                if table_depth == 0:
+                    save_sub_chunk(current_sub_content)
                 continue
 
-            if in_table:
-                # 테이블 내부 줄이면 기호 상관없이 무조건 테이블 버퍼에 누적
+            # 2. 테이블 내부일 경우 기호/헤더 검사 무시하고 누적
+            if table_depth > 0:
                 current_sub_content.append(line)
                 continue
 
-            # ----------------------------------
-            # 2. 단락 기호 (□,  등) 분리 로직
-            # ----------------------------------
-            # 만약 현재 줄이 '□' 같은 최상위 기호로 시작한다면?
-            if bullet_pattern.search(line):
-                # 이전 단락 기호부터 지금까지 모았던 내용을 청크로 저장!
+            # 3. 테이블 외부일 때만 헤더 및 기호 기반 분할 수행
+            # 💡 [핵심] 헤더(###)는 자르지 않고 누적, 단락 기호는 자름
+            if clean_line.startswith('#'):
+                # 헤더를 만났을 때 이전 내용이 있다면 저장하고 새로 시작
                 save_sub_chunk(current_sub_content)
-                # 새로운 단락 기호 내용을 담기 시작
+                current_sub_content.append(line)
+            elif split_bullet_pattern and split_bullet_pattern.search(clean_line):
+                save_sub_chunk(current_sub_content)
                 current_sub_content.append(line)
             else:
-                # 일반 텍스트나 하위 기호(예: -)는 현재 단락에 계속 누적
                 current_sub_content.append(line)
 
-        # for문이 끝난 뒤 버퍼에 남아있는 마지막 내용 저장
         save_sub_chunk(current_sub_content)
 
     return refined_chunks
