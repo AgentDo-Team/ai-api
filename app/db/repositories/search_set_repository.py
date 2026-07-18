@@ -6,6 +6,7 @@ AnalysisResult 의 FK 를 충족시키기 위한 최소 구현이다. HardFilter
 
 from __future__ import annotations
 
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.enums import SearchSetStatus
@@ -23,6 +24,23 @@ class SearchSetRepository:
 
     async def get(self, search_set_id: int) -> SearchSet | None:
         return await self.session.get(SearchSet, search_set_id)
+
+    async def list_by_company(
+        self, company_id: int, limit: int = 50, offset: int = 0
+    ) -> list[SearchSet]:
+        """회사의 검색 세션(채팅방)을 최신순으로 반환한다. 채팅 목록용."""
+        result = await self.session.exec(
+            select(SearchSet)
+            .where(SearchSet.company_id == company_id)
+            .order_by(SearchSet.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        return list(result.all())
+
+    async def delete(self, search_set: SearchSet) -> None:
+        """chat_messages 등 하위 리소스는 FK ON DELETE CASCADE 로 함께 삭제된다."""
+        await self.session.delete(search_set)
 
     async def set_status(
         self, search_set_id: int, status: SearchSetStatus
