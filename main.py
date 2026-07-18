@@ -5,8 +5,12 @@ from sqlmodel import SQLModel
 from app.api.auth import router as auth_router
 from app.api.search import router as search_router
 from app.common.exception_handlers import register_exception_handlers
+from app.core.logging import setup_logging
 from app.schemas.response import ApiResponse
 from app.api import bids, companies, company_profiles, company_projects, ingest, proposal, third_filter
+
+# uvicorn 이 자체 로깅을 구성한 뒤 이 모듈을 import 하므로, 여기서 불러야 설정이 살아남는다.
+setup_logging()
 
 OPENAPI_TAGS = [
     {
