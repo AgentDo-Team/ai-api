@@ -121,6 +121,11 @@ async def stream_search_set_status(
     남의 세트/없는 세트면 403/404 로 바로 끝난다(스트림이 열리지 않는다).
 
     SSE 스트림이라 다른 엔드포인트와 달리 ApiResponse 로 감싸지 않는다.
+    status: ongoing_second_filter → ongoing_third_filter → ongoing_report_generation
+    → completed 순으로 바뀐다.
+    status=ongoing_third_filter 인 동안에는 progress_current/progress_total 로
+    "공고 몇 건까지 채점했는지"를 함께 내려준다. ongoing_report_generation 은 상위 공고
+    선별이 끝나고 적합성 분석/요약 리포트를 작성 중인 단계다.
     """
     search_set = await search_set_repo.get(search_set_id)
     if search_set is None:

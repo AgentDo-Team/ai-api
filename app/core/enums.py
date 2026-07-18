@@ -104,4 +104,5 @@ ProcurementCategory = enum.Enum(
 class SearchSetStatus(str, enum.Enum):
     ONGOING_SECOND_FILTER = "ongoing_second_filter"  # 2차 소프트필터 진행 중
     ONGOING_THIRD_FILTER = "ongoing_third_filter"  # 3차 필터(배점표 채점) 진행 중
+    ONGOING_REPORT_GENERATION = "ongoing_report_generation"  # 상위 5건 확정 후 적합성 검증/요약 리포트 작성 중
     COMPLETED = "completed"  # 3차 필터까지 완료
