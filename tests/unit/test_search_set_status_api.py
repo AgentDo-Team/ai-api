@@ -1,11 +1,16 @@
-"""검색세트 상태 폴링 엔드포인트(GET /bid-notices/search-sets/{id}/status) 테스트.
+"""검색세트 상태 SSE 스트림 엔드포인트
+(GET /bid-notices/search-sets/{id}/status/stream) 테스트.
 
-get_current_account / get_search_set_repository 를 갈아끼워 DB 없이 라우터·인가 로직만 검증한다.
+소유권 검증(403/404)은 스트림이 열리기 전에 수행되므로 주입된 fake 리포지토리로 검증한다.
+스트림 본문은 `_read_status` 를 갈아끼워 가짜 상태 시퀀스를 흘려보내며 검증한다(DB 불필요).
 """
+
+import json
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.api import search as search_api
 from app.api.auth import get_current_account
 from app.api.deps import get_search_set_repository
 from app.db.models.company import Company
@@ -45,49 +50,82 @@ async def status_client():
     app.dependency_overrides.clear()
 
 
-async def test_get_status_returns_own_search_set_status(status_client):
-    """3차 필터 진행 중이면 진행률(채점 끝난 공고 수/대상 수)도 함께 내려준다."""
-    response = await status_client.get("/bid-notices/search-sets/1/status")
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["success"] is True
-    assert body["data"] == {
-        "search_set_id": 1,
-        "status": "ongoing_third_filter",
-        "progress_current": 3,
-        "progress_total": 10,
-    }
+def _parse_sse(body: str) -> list[dict]:
+    """SSE 본문(`data: {json}\n\n` 블록들)을 이벤트 dict 리스트로 파싱한다."""
+    events = []
+    for block in body.split("\n\n"):
+        line = next((l for l in block.split("\n") if l.startswith("data:")), None)
+        if line:
+            events.append(json.loads(line[5:].strip()))
+    return events
 
 
-async def test_get_status_progress_is_null_before_third_filter(status_client):
-    """3차 필터 전(진행률 미기록)에는 progress 필드가 null 로 나간다."""
-    response = await status_client.get("/bid-notices/search-sets/2/status")
-    assert response.status_code == 403  # 2번은 남의 검색세트라 접근 불가
-
-    # 진행률이 없는 본인 검색세트로 다시 확인
-    from app.api.deps import get_search_set_repository
-
-    sets = {3: SearchSet(id=3, company_id=1, title="시작 전", status=None)}
-    app.dependency_overrides[get_search_set_repository] = lambda: FakeSearchSetRepository(sets)
-
-    response = await status_client.get("/bid-notices/search-sets/3/status")
-    assert response.status_code == 200
-    assert response.json()["data"] == {
-        "search_set_id": 3,
-        "status": None,
-        "progress_current": None,
-        "progress_total": None,
-    }
-
-
-async def test_get_status_rejects_other_companys_search_set(status_client):
-    response = await status_client.get("/bid-notices/search-sets/2/status")
-
+async def test_stream_rejects_other_companys_search_set(status_client):
+    """남의 검색세트는 스트림이 열리기 전에 403 으로 끝난다."""
+    response = await status_client.get("/bid-notices/search-sets/2/status/stream")
     assert response.status_code == 403
 
 
-async def test_get_status_404_when_not_found(status_client):
-    response = await status_client.get("/bid-notices/search-sets/999/status")
-
+async def test_stream_404_when_not_found(status_client):
+    response = await status_client.get("/bid-notices/search-sets/999/status/stream")
     assert response.status_code == 404
+
+
+async def test_stream_emits_status_changes_until_completed(status_client, monkeypatch):
+    """상태/진행률이 바뀔 때마다 status 이벤트를 보내고, completed 에서 스트림을 닫는다.
+
+    같은 값이 연속으로 관측되면(3/10 → 3/10) 중복 이벤트를 보내지 않는다.
+    """
+    sequence = [
+        SearchSet(id=1, company_id=1, status="ongoing_second_filter"),
+        SearchSet(id=1, company_id=1, status="ongoing_third_filter",
+                  progress_current=3, progress_total=10),
+        SearchSet(id=1, company_id=1, status="ongoing_third_filter",
+                  progress_current=3, progress_total=10),  # 중복 → 스킵 대상
+        SearchSet(id=1, company_id=1, status="ongoing_third_filter",
+                  progress_current=7, progress_total=10),
+        SearchSet(id=1, company_id=1, status="completed",
+                  progress_current=10, progress_total=10),
+    ]
+    calls = {"i": 0}
+
+    async def fake_read_status(search_set_id: int) -> SearchSet:
+        item = sequence[min(calls["i"], len(sequence) - 1)]
+        calls["i"] += 1
+        return item
+
+    monkeypatch.setattr(search_api, "_read_status", fake_read_status)
+    monkeypatch.setattr(search_api, "STATUS_POLL_INTERVAL_SECONDS", 0)
+
+    response = await status_client.get("/bid-notices/search-sets/1/status/stream")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+
+    events = _parse_sse(response.text)
+    statuses = [e["status"] for e in events]
+    # 중복 3/10 은 한 번만, completed 에서 종료.
+    assert statuses == [
+        "ongoing_second_filter",
+        "ongoing_third_filter",
+        "ongoing_third_filter",
+        "completed",
+    ]
+    third = next(e for e in events if e["status"] == "ongoing_third_filter")
+    assert (third["progress_current"], third["progress_total"]) == (3, 10)
+    assert events[-1]["type"] == "status"
+    assert events[-1]["status"] == "completed"
+
+
+async def test_stream_reports_error_when_set_disappears(status_client, monkeypatch):
+    """소유권 통과 후 세트가 사라지면 error 이벤트로 알리고 종료한다."""
+
+    async def fake_read_status(search_set_id: int) -> SearchSet | None:
+        return None
+
+    monkeypatch.setattr(search_api, "_read_status", fake_read_status)
+    monkeypatch.setattr(search_api, "STATUS_POLL_INTERVAL_SECONDS", 0)
+
+    response = await status_client.get("/bid-notices/search-sets/1/status/stream")
+    assert response.status_code == 200
+    events = _parse_sse(response.text)
+    assert events[-1]["type"] == "error"

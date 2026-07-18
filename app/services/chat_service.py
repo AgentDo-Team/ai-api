@@ -127,6 +127,8 @@ class ChatService:
     # 채팅 관련
     # 
 
+
+    # 지금은 얘 안씀 chat_stream 으로 쓰기 때문에 삭제해도 무방하나, 이후 프로젝트 때 참고하려고 남겨둠
     async def chat(
         self,
         company_id: int,
@@ -146,6 +148,8 @@ class ChatService:
         if bid_notice_id is not None:
             chunks = await dense_search(self.session, bid_notice_id, question_embedding)
             docs_context = "\n\n".join(c.content or "" for c in chunks) or "(관련 공고 내용 없음)"
+        else:
+            docs_context = "(지정된 공고 없음)" #이거 필요 없는데 없으면 테스트 팅겨서 그냥 둠
         company_context = await build_company_context(self.session, company_id)
 
         # 3) 답변 생성 (print 대신 반환값 사용)
@@ -194,6 +198,8 @@ class ChatService:
                 self.session, bid_notice_id, question_embedding
             )
             docs_context = "\n\n".join(c.content or "" for c in chunks) or "(관련 공고 내용 없음)"
+        else:
+            docs_context = "(지정된 공고 없음)"
         company_context = await build_company_context(self.session, company_id)
 
         # 3. astream 을 사용하여 답변을 토큰 단위로 스트리밍하며 누적
@@ -214,6 +220,7 @@ class ChatService:
         assistant_message = ChatMessage(
             search_set_id=session_id, role="assistant", content="".join(parts)
         )
+        # DB 커밋 관련
         await self.chat_message_repo.add(assistant_message)
         await self.session.commit()
         await self.session.refresh(assistant_message)
