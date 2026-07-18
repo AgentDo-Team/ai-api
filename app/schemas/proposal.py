@@ -26,9 +26,3 @@ class ProposalDraftData(BaseModel):
     proposal_advantage: str = Field(description="제안의 핵심 강점 요약")
     business_summary: str = Field(description="사업 이해 및 요약")
     proposal_items: List[ProposalItem] = Field(description="상세 제안 항목 목록")
-
-# --- 참조 데이터 (references) ---
-class ProposalReference(BaseModel):
-    company_profile: List[str] = Field(description="참조된 자사 프로필 키워드")
-    projects: List[int] = Field(description="참조된 프로젝트 ID 목록")
-    bid_chunks: List[int] = Field(description="참조된 공고 청크 ID 목록")
