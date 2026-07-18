@@ -28,6 +28,10 @@ class SearchSet(SQLModel, table=True):
     )  # 어떤 회사의 검색 세트인지
     title: str = Field(max_length=200, nullable=False)  # 검색 세트 제목
     status: str | None = Field(default=None, max_length=40)  # 분석 상태 (Enum)
+    # 3차 필터 진행률 (프론트 폴링 표시용). 채점이 끝난 공고 수 / 채점 대상 공고 수.
+    # 3차 필터 시작 시 0/후보수 로 초기화되고, 공고 채점이 끝날 때마다 current 가 오른다.
+    progress_current: int | None = Field(default=None)
+    progress_total: int | None = Field(default=None)
     created_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), server_default=func.now(), nullable=False),

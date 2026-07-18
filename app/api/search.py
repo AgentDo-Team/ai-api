@@ -32,7 +32,10 @@ async def search_bid_notices(
     current_account: CurrentAccountDep,
     session: AsyncSession = Depends(get_session),
 ) -> ApiResponse[BidSearchResponse]:
-    """채팅창 공고 검색: 1차 하드 필터링 + 2차 소프트필터(청크 랭킹). 본인 회사 기준."""
+    """채팅창 공고 검색: 1차 하드 필터링 + 2차 소프트필터(청크 랭킹). 본인 회사 기준.
+
+    company_id는 요청 본문이 아니라 JWT 토큰의 로그인 계정(=회사)에서 가져온다.
+    """
     result = await search_service.search_bid_notices(
         session, current_account.id, request
     )
@@ -48,8 +51,10 @@ async def get_search_set_status(
     """검색세트(채팅방) 분석 진행 상태 조회. 2차/3차 필터 진행 여부를 프론트가 폴링한다.
 
     status: ongoing_second_filter → ongoing_third_filter → ongoing_report_generation
-    → completed 순으로 바뀐다. ongoing_report_generation 은 상위 공고 선별이 끝나고
-    적합성 분석/요약 리포트를 작성 중인 단계다.
+    → completed 순으로 바뀐다.
+    status=ongoing_third_filter 인 동안에는 progress_current/progress_total 로
+    "공고 몇 건까지 채점했는지"를 함께 내려준다. ongoing_report_generation 은 상위 공고
+    선별이 끝나고 적합성 분석/요약 리포트를 작성 중인 단계다.
     """
     search_set = await search_set_repo.get(search_set_id)
     if search_set is None:
@@ -58,7 +63,12 @@ async def get_search_set_status(
         raise AppException("본인 회사의 검색세트만 조회할 수 있습니다.", status_code=403)
 
     return ApiResponse.ok(
-        data=SearchSetStatusResponse(search_set_id=search_set.id, status=search_set.status)
+        data=SearchSetStatusResponse(
+            search_set_id=search_set.id,
+            status=search_set.status,
+            progress_current=search_set.progress_current,
+            progress_total=search_set.progress_total,
+        )
     )
 
 

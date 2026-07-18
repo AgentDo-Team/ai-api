@@ -1,21 +1,24 @@
 """3차 필터 오케스트레이션.
 
 흐름:
-1. 입력 공고 전체를 EvaluationService.evaluate 로 배점표 채점 (공고 간 병렬, 공고별 독립 세션)
-2. final_score(= soft_score) 내림차순 정렬 → 상위 TOP_N 선별
-3. 상위 공고만 (a) 공고 청크 전체 ↔ 회사 프로필/프로젝트 전체 적합성 LLM 분석
+1. aggregate_score(2차 매칭도) 내림차순 상위 CANDIDATE_N 건으로 채점 후보를 좁힌다
+2. 후보 공고를 EvaluationService.evaluate 로 배점표 채점 (공고 간 병렬, 공고별 독립 세션).
+   채점 끝난 공고 수를 진행률(progress_current/total)로 기록해 프론트 폴링에 내려준다
+3. final_score(= soft_score) 내림차순 정렬 → 상위 TOP_N 선별
+4. 상위 공고만 (a) 공고 청크 전체 ↔ 회사 프로필/프로젝트 전체 적합성 LLM 분석
    (공고 1건당 요청 1건을 상위 5건 묶어 배치 전송, recommend_reason/weaknesses 각 최대 5개)
    (b) 공고 내용 100자 요약 을 수행하고 AnalysisResult(recommend_reason/weaknesses/summary)에 저장
    → 이 단계 진입 시 검색세트 상태를 ongoing_report_generation 으로 바꿔 프론트에 구분해 보여준다
-4. 상위 공고 목록 + 처리 제외(skipped) 목록 반환
+5. 상위 공고 목록 + 처리 제외(skipped) 목록 반환
 
 적합성 분석의 근거 강도: 각 항목은 grounding='cited'(프로필/프로젝트 필드 인용) 또는
 'inferred'(정황 추론)로 구분된다. LLM 이 인용했다고 답해도 그 ID 가 프롬프트에 실제로 실린
 근거가 아니면 _guard_fit_analysis 가 inferred 로 내린다 — cited 라벨이 "정말 그 필드에
 적혀 있다"는 뜻을 유지해야 프론트/사용자가 근거를 신뢰할 수 있다.
 
-aggregate_score 의 용도: 최종점수(final_score) 산정에는 쓰지 않는다. 2차 필터가 이미 반영한
-매칭도라 점수로 다시 더하면 이중 계산이 되기 때문이다. 응답에는 참고 정보로 그대로 포함한다.
+aggregate_score 의 용도: 1단계 후보 선별에만 쓰고, 최종점수(final_score) 산정에는 쓰지 않는다.
+2차 필터가 이미 반영한 매칭도라 점수로 다시 더하면 이중 계산이 되지만, 어느 공고를 채점할지
+고르는 사전 지표로는 유효하다. 응답에는 참고 정보로 그대로 포함한다.
 
 동시성: SQLAlchemy AsyncSession 은 동시 쿼리를 허용하지 않으므로,
 공고 간 병렬화는 공고마다 session_factory 로 새 세션을 열어 처리한다.
@@ -162,6 +165,10 @@ class _ScoredNotice:
 
 class ThirdFilterService:
     TOP_N = 5
+    # 배점표 채점 대상 후보 수. 채점은 공고당 LLM 호출이 수십 회로 가장 비싼 단계인데
+    # 최종 반환은 TOP_N(5) 건뿐이라, aggregate_score 상위 이만큼만 채점한다.
+    # TOP_N 보다 넉넉히 잡아 aggregate_score 와 soft_score 의 순위 차이를 흡수한다.
+    CANDIDATE_N = 10
     MAX_CONCURRENT_NOTICES = 3  # 공고 간 병렬 처리 상한 (LLM/DB 부하 제한)
 
     def __init__(
@@ -174,6 +181,9 @@ class ThirdFilterService:
         self.llm = llm
         self.evaluation_service_factory = evaluation_service_factory
         self._semaphore = asyncio.Semaphore(self.MAX_CONCURRENT_NOTICES)
+        # 채점이 끝난 공고 수(진행률 폴링용). 서비스는 요청마다 새로 만들어지고 asyncio 는
+        # 단일 스레드라, 이 카운터는 await 없이 증가시키는 한 경쟁 없이 안전하다.
+        self._completed = 0
 
     # ------------------------------------------------------------------ #
     # 전체 오케스트레이션
@@ -181,15 +191,32 @@ class ThirdFilterService:
 
     async def run(self, req: ThirdFilterRequest) -> ThirdFilterResponse:
         skipped: list[SkippedNotice] = []
+        self._completed = 0
 
-        # 3차 필터 시작 → 검색세트 상태를 진행중으로 갱신(폴링용).
+        # 1단계: aggregate_score 상위 CANDIDATE_N 건만 채점 후보로 좁힌다.
+        # 진행률의 분모가 후보 수라서, 상태를 진행중으로 바꾸기 전에 먼저 확정한다.
+        candidates = sorted(req.results, key=lambda r: r.aggregate_score, reverse=True)[
+            : self.CANDIDATE_N
+        ]
+
+        # 3차 필터 시작 → 상태를 진행중으로, 진행률을 0/후보수 로 초기화(폴링용).
         await self._set_search_set_status(
             req.search_set_id, SearchSetStatus.ONGOING_THIRD_FILTER
         )
+        await self._set_progress(req.search_set_id, 0, len(candidates))
+        logger.info(
+            "[3차] 시작 search_set=%s | 입력 %d건 → 채점 후보 %d건 (aggregate_score 상위)",
+            req.search_set_id,
+            len(req.results),
+            len(candidates),
+        )
 
-        # 1단계: 모든 공고 배점표 채점 (공고별 독립 세션으로 병렬)
+        # 2단계: 후보 공고 배점표 채점 (공고별 독립 세션으로 병렬)
         outcomes = await asyncio.gather(
-            *[self._evaluate_notice(req, item) for item in req.results]
+            *[
+                self._evaluate_notice(req, item, i, len(candidates))
+                for i, item in enumerate(candidates, start=1)
+            ]
         )
         scored: list[_ScoredNotice] = []
         for outcome in outcomes:
@@ -198,11 +225,11 @@ class ThirdFilterService:
             else:
                 scored.append(outcome)
 
-        # 2단계: 최종점수(=soft_score) 내림차순 상위 TOP_N
+        # 3단계: 최종점수(=soft_score) 내림차순 상위 TOP_N
         scored.sort(key=lambda s: s.final_score, reverse=True)
         top = scored[: self.TOP_N]
 
-        # 3단계: 상위 공고만 적합성 분석 + 요약 + AnalysisResult 저장
+        # 4단계: 상위 공고만 적합성 분석 + 요약 + AnalysisResult 저장
         # 상위 TOP_N 이 확정된 시점부터는 "무엇을 채점 중인지"가 아니라 "리포트를 작성 중"이라
         # 프론트에 다른 문구를 보여줄 수 있도록 상태를 분리한다.
         await self._set_search_set_status(
@@ -213,14 +240,13 @@ class ThirdFilterService:
             len(top),
             [s.item.bid_notice_id for s in top],
         )
-
-        # 3-a: 공고별 적합성 분석 프롬프트 구성(DB 읽기만, 공고마다 독립 세션이라 병렬 안전)
+        # 4-a: 공고별 적합성 분석 프롬프트 구성(DB 읽기만, 공고마다 독립 세션이라 병렬 안전)
         fit_prompts = await asyncio.gather(
             *[self._build_fit_prompt(req, s.item) for s in top]
         )
-        # 3-b: 상위 TOP_N 건을 한 번의 배치 호출로 묶어 적합성 분석(공고 1건당 요청 1건)
+        # 4-b: 상위 TOP_N 건을 한 번의 배치 호출로 묶어 적합성 분석(공고 1건당 요청 1건)
         fit_analyses = await self._batch_analyze_fit(list(fit_prompts))
-        # 3-c: 공고별 요약 + AnalysisResult 저장
+        # 4-c: 공고별 요약 + AnalysisResult 저장
         verified = await asyncio.gather(
             *[
                 self._summarize_and_save(req, s, fit)
@@ -245,14 +271,39 @@ class ThirdFilterService:
         async with self.session_factory() as session:
             await SearchSetRepository(session).set_status(search_set_id, status)
 
+    async def _set_progress(self, search_set_id: int, current: int, total: int) -> None:
+        """진행률을 기록한다. 표시용이라 실패해도 채점 파이프라인을 멈추지 않는다."""
+        try:
+            async with self.session_factory() as session:
+                await SearchSetRepository(session).set_progress(
+                    search_set_id, current, total
+                )
+        except Exception:
+            logger.warning(
+                "진행률 갱신 실패 (무시하고 계속): search_set_id=%s %s/%s",
+                search_set_id,
+                current,
+                total,
+                exc_info=True,
+            )
+
     # ------------------------------------------------------------------ #
-    # 1단계: 공고 1건 채점
+    # 2단계: 공고 1건 채점
     # ------------------------------------------------------------------ #
 
     async def _evaluate_notice(
-        self, req: ThirdFilterRequest, item: NoticeResultIn
+        self, req: ThirdFilterRequest, item: NoticeResultIn, index: int, total: int
     ) -> _ScoredNotice | SkippedNotice:
+        # 세마포어 안에서 로그를 찍어야 실제 분석이 시작되는 시점과 일치한다
+        # (동시 MAX_CONCURRENT_NOTICES 건만 진행하므로 나머지는 여기서 대기한다).
         async with self._semaphore:
+            logger.info(
+                "[채점] 공고 분석 시작 (%d/%d) notice=%s aggregate=%.4f",
+                index,
+                total,
+                item.bid_notice_id,
+                item.aggregate_score,
+            )
             try:
                 async with self.session_factory() as session:
                     service = self.evaluation_service_factory(session, self.llm)
@@ -261,23 +312,43 @@ class ThirdFilterService:
                         bid_notice_id=item.bid_notice_id,
                         company_id=req.company_id,
                     )
-                return _ScoredNotice(item, soft_score=analysis.soft_score or 0)
+                soft_score = analysis.soft_score or 0
+                logger.info(
+                    "[채점] 공고 분석 완료 (%d/%d) notice=%s soft_score=%s",
+                    index,
+                    total,
+                    item.bid_notice_id,
+                    soft_score,
+                )
+                return _ScoredNotice(item, soft_score=soft_score)
             except AppException as e:
                 # 배점표 미발견(404) 등은 부적격이 아니라 '배점표 가점 없음'으로 취급해
                 # soft_score=0(=final_score 최하위)으로 랭킹에는 남긴다(skipped 로 빠뜨리지 않음).
+                logger.info(
+                    "[채점] 공고 채점 불가 (%d/%d) notice=%s soft_score=0 사유=%s",
+                    index,
+                    total,
+                    item.bid_notice_id,
+                    e.message,
+                )
                 return _ScoredNotice(item, soft_score=0, note=e.message)
             except Exception:
                 logger.exception("공고 채점 실패: bid_notice_id=%s", item.bid_notice_id)
                 return SkippedNotice(
                     bid_notice_id=item.bid_notice_id, reason="채점 중 오류가 발생했습니다."
                 )
+            finally:
+                # 성공/채점불가/오류 어느 쪽이든 이 공고는 처리가 끝났다. 셋 다 세어야
+                # 진행률이 끝까지 차오른다(오류 난 공고에서 멈춰 보이지 않게).
+                self._completed += 1
+                await self._set_progress(req.search_set_id, self._completed, total)
 
     # ------------------------------------------------------------------ #
-    # 3단계: 상위 TOP_N(5) 공고 적합성 분석 + 요약 + 저장
-    #   3-a _build_fit_prompt   공고별 프롬프트 구성 (DB 읽기, 공고마다 독립 세션으로 병렬)
-    #   3-b _batch_analyze_fit  상위 TOP_N 건을 한 번의 배치 호출로 (공고 1건당 요청 1건)
-    #   3-c _summarize_and_save 공고별 요약 + AnalysisResult 저장
-    #   3-a/3-c 는 공고 1건 단위, 3-b 만 전체를 묶는다.
+    # 4단계: 상위 TOP_N(5) 공고 적합성 분석 + 요약 + 저장
+    #   4-a _build_fit_prompt   공고별 프롬프트 구성 (DB 읽기, 공고마다 독립 세션으로 병렬)
+    #   4-b _batch_analyze_fit  상위 TOP_N 건을 한 번의 배치 호출로 (공고 1건당 요청 1건)
+    #   4-c _summarize_and_save 공고별 요약 + AnalysisResult 저장
+    #   4-a/4-c 는 공고 1건 단위, 4-b 만 전체를 묶는다.
     # ------------------------------------------------------------------ #
 
     async def _build_fit_prompt(

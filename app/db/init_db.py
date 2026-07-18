@@ -3,8 +3,9 @@
 실행 순서:
   1. 확장 생성: vector(pgvector) + pg_search(BM25)
   2. SQLModel 메타데이터 기반 전체 테이블 생성 (create_all)
-  3. 벡터 컬럼(HNSW, cosine) 인덱스 생성
-  4. BM25 렉시컬 인덱스 생성 (chunks.content, 한국어 형태소 분석기)
+  3. 기존 테이블에 추가된 컬럼 반영 (create_all 은 기존 테이블을 변경하지 않는다)
+  4. 벡터 컬럼(HNSW, cosine) 인덱스 생성
+  5. BM25 렉시컬 인덱스 생성 (chunks.content, 한국어 형태소 분석기)
 
 사용법:
   uv run python -m app.db.init_db
@@ -19,6 +20,13 @@ from sqlmodel import SQLModel
 import app.db.models  # noqa: F401
 from app.db.session import engine
 
+# 기존 테이블에 나중에 추가된 컬럼. create_all 은 이미 있는 테이블을 건드리지 않으므로
+# (이 프로젝트에는 마이그레이션 도구가 없다) 여기서 멱등 ALTER 로 채워준다.
+COLUMN_MIGRATIONS = (
+    "ALTER TABLE search_sets ADD COLUMN IF NOT EXISTS progress_current INTEGER",
+    "ALTER TABLE search_sets ADD COLUMN IF NOT EXISTS progress_total INTEGER",
+)
+
 # NULL=미임베딩 벡터 컬럼에 대한 HNSW(cosine) 인덱스
 VECTOR_INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_chunks_embedding "
@@ -31,20 +39,12 @@ VECTOR_INDEXES = (
     "ON eval_criteria_references USING hnsw (embedding vector_cosine_ops)",
 )
 
-# BM25 렉시컬 인덱스 (pg_search v2 API). content 컬럼을 한국어 형태소 분석기(pdb.lindera)로
-# 캐스팅해 색인하고, bid_notice_id 는 필터 푸시다운을 위해 함께 색인한다.
-# dense(HNSW)와 함께 하이브리드 검색을 구성한다.
+# BM25 렉시컬 인덱스 (pg_search). content 를 한국어 형태소 분석기(korean_lindera)로
+# 색인하고, bid_notice_id 를 함께 색인해 공고 필터가 인덱스에 푸시다운되도록 한다
+# (2차 소프트필터의 배치 BM25 검색이 이 인덱스를 쓴다). dense(HNSW)와 함께 하이브리드 구성.
 LEXICAL_INDEXES = (
     """CREATE INDEX IF NOT EXISTS idx_chunks_bm25 ON chunks
-       USING bm25 (id, bid_notice_id, (content::pdb.lindera(korean)))
-       WITH (key_field='id')""",
-)
-
-# BM25 렉시컬 인덱스 (pg_search). content 원문을 한국어 형태소 분석기(korean_lindera)로
-# 색인해 정확 용어 매칭에 사용한다. dense(HNSW)와 함께 하이브리드 검색을 구성.
-LEXICAL_INDEXES = (
-    """CREATE INDEX IF NOT EXISTS idx_chunks_bm25 ON chunks
-       USING bm25 (id, content)
+       USING bm25 (id, content, bid_notice_id)
        WITH (key_field='id', text_fields='{"content":{"tokenizer":{"type":"korean_lindera"}}}')""",
 )
 
@@ -58,11 +58,15 @@ async def init_db() -> None:
         # 2. 전체 테이블 생성
         await conn.run_sync(SQLModel.metadata.create_all)
 
-        # 3. 벡터(HNSW) 인덱스 생성
+        # 3. 기존 테이블에 추가된 컬럼 반영
+        for stmt in COLUMN_MIGRATIONS:
+            await conn.execute(text(stmt))
+
+        # 4. 벡터(HNSW) 인덱스 생성
         for stmt in VECTOR_INDEXES:
             await conn.execute(text(stmt))
 
-        # 4. BM25 렉시컬 인덱스 생성
+        # 5. BM25 렉시컬 인덱스 생성
         for stmt in LEXICAL_INDEXES:
             await conn.execute(text(stmt))
 

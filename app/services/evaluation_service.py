@@ -99,14 +99,19 @@ class EvaluationService:
         matched = [c for c in chunks if c.content and is_eval_criteria_table(c.content)]
 
         if matched:
+            logger.info(
+                "  [notice=%s] 배점표 탐지: 공고 청크에서 발견 (청크 %d개)",
+                bid_notice_id,
+                len(matched),
+            )
             joined_text = "\n\n".join(c.content for c in matched if c.content)
         else:
             # 하드 필터가 배점표 청크를 하나도 못 찾은 경우.
             # 임베딩 하이브리드 검색은 결과가 불안정해, 표준 평가표 템플릿을 대체 채점표로 사용한다.
-            print(
-                f"[evaluation] bid_notice_id={bid_notice_id}: "
-                f"적절한 배점표 청크를 찾지 못해 대체 채점표를 사용합니다 "
-                f"(template={_FALLBACK_TEMPLATE_FILENAME})"
+            logger.info(
+                "  [notice=%s] 배점표 탐지: 공고에서 못 찾아 대체 채점표 사용 (template=%s)",
+                bid_notice_id,
+                _FALLBACK_TEMPLATE_FILENAME,
             )
             joined_text = self._load_fallback_template_text()
 
@@ -117,6 +122,9 @@ class EvaluationService:
         )
         if not result.criteria:
             raise AppException("평가기준표에서 세부평가 항목을 분리하지 못했습니다.", status_code=422)
+        logger.info(
+            "  [notice=%s] 평가항목 분리 완료: %d개", bid_notice_id, len(result.criteria)
+        )
         return result.criteria # criteria: list[EvalCriterion]
 
     @staticmethod
@@ -140,6 +148,7 @@ class EvaluationService:
         async with self.session_factory() as session:
             # 평가 항목과 관련된 청크를 추가로 집어넣고 배점표의 항목이 구체적으로 어떤건지 보완
             # 하이브리드 서치를 통해 상위 5개 청크 가져온다
+            # 이거 지금은 안씀
             search_results = await hybrid_search_chunks(
                 ChunkRepository(session), self.llm, bid_notice_id, query_text, limit=5
             )
