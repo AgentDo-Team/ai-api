@@ -27,6 +27,7 @@ dependencies = [
     "numpy>=2.0.0",              # 소프트필터 코사인 거리 계산 (second_filter_service)
     "langchain>=1.3.14",
     "langchain-ollama>=1.1.0",
+    "tavily-python>=0.7.26",
 ]
 
 [dependency-groups]
