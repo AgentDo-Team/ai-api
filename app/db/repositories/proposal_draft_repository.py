@@ -1,4 +1,6 @@
-from sqlmodel import select
+from typing import List
+
+from sqlmodel import select, desc
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db.models.proposal_drafts import ProposalDraft
@@ -17,3 +19,27 @@ class ProposalDraftRepository:
             select(ProposalDraft).where(ProposalDraft.id == proposal_draft_id)
         )
         return result.first()
+    
+    async def get_list(
+        self, 
+        company_id: int = None, 
+        search_set_id: int = None, 
+        bid_notice_id: int = None
+    ) -> List[ProposalDraft]:
+        """
+        조건에 맞는 제안서 초안 목록을 최신순으로 조회합니다.
+        """
+        query = select(ProposalDraft)
+
+        if company_id:
+            query = query.where(ProposalDraft.company_id == company_id)
+        if search_set_id:
+            query = query.where(ProposalDraft.search_set_id == search_set_id)
+        if bid_notice_id:
+            query = query.where(ProposalDraft.bid_notice_id == bid_notice_id)
+            
+        # 최신 생성된 제안서가 먼저 오도록 정렬
+        query = query.order_by(desc(ProposalDraft.created_at))
+        
+        result = await self.session.exec(query)
+        return result.all()
