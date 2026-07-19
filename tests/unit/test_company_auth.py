@@ -20,7 +20,7 @@ PROJECT_BODY = {"title": "차세대 국방 정보체계 구축", "client": "국�
 
 
 @pytest.fixture
-async def auth_client(session, company_repo, profile_repo, project_repo):
+async def auth_client(session, company_repo, profile_repo, project_repo, partner_repo):
     """verify_company_access 를 우회하지 않는 클라이언트.
 
     get_current_account 만 갈아끼워 'id=1 회사로 로그인한 상태'를 흉내낸다.
@@ -30,6 +30,7 @@ async def auth_client(session, company_repo, profile_repo, project_repo):
         company_repo=company_repo,
         profile_repo=profile_repo,
         project_repo=project_repo,
+        partner_repo=partner_repo,
     )
     await company_repo.add(Company(id=1, name="에이전트두", email="a@agentdo.io"))
     await company_repo.add(Company(id=2, name="남의회사", email="b@other.io"))
@@ -46,13 +47,14 @@ async def auth_client(session, company_repo, profile_repo, project_repo):
 
 
 @pytest.fixture
-async def anonymous_client(session, company_repo, profile_repo, project_repo):
+async def anonymous_client(session, company_repo, profile_repo, project_repo, partner_repo):
     """토큰 없이 요청하는 클라이언트 (get_current_account 도 실제 코드를 태운다)."""
     service = CompanyService(
         session=session,
         company_repo=company_repo,
         profile_repo=profile_repo,
         project_repo=project_repo,
+        partner_repo=partner_repo,
     )
     app.dependency_overrides[get_company_service] = lambda: service
     async with AsyncClient(

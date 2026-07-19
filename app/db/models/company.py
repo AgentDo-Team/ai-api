@@ -37,6 +37,36 @@ class Company(SQLModel, table=True):
     )
 
 
+class Partner(SQLModel, table=True):
+    """회사가 보유한 협력사(회사당 N건).
+
+    공고 분석의 약점(weakness)을 이 협력사가 해결해줄 수 있는지 LLM 이 판단할 때
+    근거로 사용된다. CRUD 단계에서는 임베딩하지 않는다(tool 기반 텍스트 판단).
+    """
+
+    __tablename__ = "partners"
+
+    id: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger, primary_key=True, autoincrement=True),
+    )
+    company_id: int = Field(
+        sa_column=Column(
+            BigInteger,
+            ForeignKey("companies.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    name: str = Field(max_length=200, nullable=False)  # 협력사명
+    domain: str | None = Field(default=None, max_length=100)  # 사업 분야
+    tech_stack: str | None = Field(default=None, max_length=200)  # 보유 기술스택
+    description: str | None = Field(default=None, sa_column=Column(Text))  # 상세 설명
+    created_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), server_default=func.now(), nullable=False),
+    )
+
+
 class CompanyProfile(SQLModel, table=True):
     __tablename__ = "company_profiles"
 

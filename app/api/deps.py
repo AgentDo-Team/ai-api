@@ -16,6 +16,7 @@ from app.db.repositories.company_repository import (
     CompanyProfileRepository,
     CompanyProjectRepository,
     CompanyRepository,
+    PartnerRepository,
 )
 from app.db.repositories.analysis_repository import AnalysisResultRepository
 from app.db.repositories.chat_message_repository import ChatMessageRepository
@@ -49,6 +50,7 @@ def get_company_service(session: SessionDep) -> CompanyService:
         company_repo=CompanyRepository(session),
         profile_repo=CompanyProfileRepository(session),
         project_repo=CompanyProjectRepository(session),
+        partner_repo=PartnerRepository(session),
     )
 
 
