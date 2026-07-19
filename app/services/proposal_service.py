@@ -20,7 +20,8 @@ class ProposalService:
         self.analysis_repo = AnalysisResultRepository(session)
         self.repo = ProposalDraftRepository(session)
         self.template_path = Path("app/utils/templates/proposal_template.docx") # 실제 템플릿 경로로 수정
-        self.save_dir = Path("/Users/kangminju/Desktop/Secure_Proposals")
+        base_dir = Path(__file__).resolve().parent.parent.parent
+        self.save_dir = base_dir / "storage" / "proposals"
 
     async def generate_proposal(self, analysis_result_id: int):
         analysis_result = await self.analysis_repo.get(analysis_result_id)
@@ -209,14 +210,16 @@ class ProposalService:
         doc = Document(self.template_path)
         self._replace_placeholder(doc, replace_map)
 
-        file_name = f"Proposal_Draft_Bid_{bid_notice_id}.docx"
+        timestamp = int(time.time())
+        file_name = f"Proposal_Draft_{timestamp}.docx"
         file_path = self.save_dir / file_name
+        
         doc.save(file_path)
 
         print(f"[Success] DOCX 저장 완료: {file_path}")
-        return str(file_path)
+        return file_name
 
-    async def save_result(self, search_set_id: int, bid_notice_id: int, draft_data: dict, docx_path: str):
+    async def save_result(self, search_set_id: int, bid_notice_id: int, company_id:int, draft_data: dict, file_name: str):
         """
         생성된 제안서 초안 데이터와 파일 경로를 DB에 저장합니다.
         """
@@ -224,8 +227,9 @@ class ProposalService:
             proposal_draft = ProposalDraft(
                 search_set_id=search_set_id,
                 bid_notice_id=bid_notice_id,
+                company_id=company_id, 
                 draft_data=draft_data,
-                docx_path=docx_path
+                file_name=file_name,
             )
             
             await self.repo.add(proposal_draft)
@@ -239,7 +243,7 @@ class ProposalService:
             print(f"[Error] DB 저장 실패: {e}")
             raise e
         
-    async def process_proposal_generation(self, analysis_result_id: int) -> dict:
+    async def process_proposal_generation(self, analysis_result_id: int, company_id:int) -> dict:
         """
         [통합 파이프라인]
         1. DB 조회 -> 2. LLM 초안 생성 -> 3. DOCX 파일 생성 -> 4. 결과 DB 저장
@@ -259,7 +263,7 @@ class ProposalService:
 
         # 3. DOCX 문서 생성 및 로컬 저장
         print("[Service] 2. DOCX 파일 생성 시작...")
-        docx_path = await self.save_docx(
+        file_name = await self.save_docx(
             bid_notice_id=analysis_result.bid_notice_id, 
             draft_data=draft_data
         )
@@ -269,8 +273,9 @@ class ProposalService:
         saved_proposal = await self.save_result(
             search_set_id=analysis_result.search_set_id,
             bid_notice_id=analysis_result.bid_notice_id,
+            company_id=company_id,
             draft_data=draft_data,
-            docx_path=docx_path
+            file_name=file_name
         )
 
         print("[Service] ✨ 제안서 파이프라인 전체 완료!")
@@ -279,6 +284,23 @@ class ProposalService:
         return {
             "proposal_id": saved_proposal.id,
             "bid_notice_id": analysis_result.bid_notice_id,
-            "docx_path": docx_path,
+            "file_name": file_name,
             "message": "제안서 초안 생성 및 저장이 완료되었습니다."
         }
+    async def get_proposal_file_path(self, proposal_id: int) -> tuple[Path, str]:
+        """
+        DB에서 제안서 정보를 조회하고, 실제 저장된 파일 경로와 파일명을 반환합니다.
+        """
+        # 1. DB에서 제안서(ProposalDraft) 조회
+        proposal = await self.repo.get_by_proposal_draft_id(proposal_id)
+        if not proposal:
+            raise ValueError(f"제안서(ID: {proposal_id}) 정보를 찾을 수 없습니다.")
+
+        # 2. 실제 파일 경로 조립
+        file_path = self.save_dir / proposal.file_name
+
+        # 3. 실제 파일이 디스크에 존재하는지 검증
+        if not file_path.exists():
+            raise FileNotFoundError("DB에 기록은 있으나, 서버에 실제 파일이 존재하지 않습니다.")
+
+        return file_path, proposal.file_name
