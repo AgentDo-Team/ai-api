@@ -14,6 +14,7 @@ router = APIRouter(prefix="/proposal", tags=["proposal"])
 @router.post("/generate", summary="제안서 초안 생성 전체 파이프라인")
 async def generate_proposal(
     analysis_result_id: int,
+    company_id:int,
     session: AsyncSession = Depends(get_session)
 ):
     """
@@ -24,7 +25,7 @@ async def generate_proposal(
 
     try:
         # 서비스의 통합 파이프라인 호출
-        result = await service.process_proposal_generation(analysis_result_id)
+        result = await service.process_proposal_generation(analysis_result_id, company_id)
         
         # 성공 응답
         return ApiResponse.ok(
