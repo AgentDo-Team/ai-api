@@ -25,7 +25,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
@@ -51,16 +52,33 @@ def _resume_to_approved(decision: object) -> bool:
     return bool(decision)
 
 
-def build_collaboration_email_graph(llm: LLMProvider | None = None):
+def build_collaboration_email_graph(
+    llm: LLMProvider | None = None,
+    checkpointer: BaseCheckpointSaver | None = None,
+):
     """협업 제안 이메일 서브그래프를 컴파일해 반환한다.
 
     llm 을 주입하지 않으면 기본 구현(OpenAIProvider)을 사용한다.
+
+    checkpointer:
+      - 단독 실행 시 InMemorySaver 등을 주입해야 interrupt/resume 이 동작한다.
+      - 메인 그래프의 노드로 임베드할 땐 None 으로 컴파일해 부모(메인) 그래프의
+        checkpointer 를 상속받는다. 그래야 interrupt 가 최상위 thread 로 전파돼
+        같은 thread_id 로 Command(resume=...) 재개가 가능하다.
     """
 
     llm = llm or OpenAIProvider()
 
     async def compose_draft(state: CollaborationEmailState) -> dict:
         """회사/협력사/공고를 조회하고 LLM 으로 메일 초안(to/subject/body)을 만든다."""
+        get_stream_writer()(
+            {
+                "type": "node",
+                "graph": "email",
+                "node": "compose_draft",
+                "label": "이메일 작성 중",
+            }
+        )
         async with async_session_factory() as session:
             service = CollaborationEmailService(
                 company_repo=CompanyRepository(session),
@@ -118,6 +136,14 @@ def build_collaboration_email_graph(llm: LLMProvider | None = None):
         gmail_client.send_email 은 blocking(googleapiclient) 이라 이벤트 루프를 막지 않도록
         스레드로 오프로드한다.
         """
+        get_stream_writer()(
+            {
+                "type": "node",
+                "graph": "email",
+                "node": "send_email",
+                "label": "이메일 전송 중",
+            }
+        )
         result = await asyncio.to_thread(
             send_email,
             to=state["to"],
@@ -142,4 +168,5 @@ def build_collaboration_email_graph(llm: LLMProvider | None = None):
     builder.add_edge("send_email", END)
 
     # interrupt 기반 HITL 은 checkpointer 가 있어야 중단 지점에서 재개할 수 있다.
-    return builder.compile(checkpointer=InMemorySaver())
+    # 임베드 시엔 None 으로 컴파일해 부모 그래프의 checkpointer 를 상속받는다.
+    return builder.compile(checkpointer=checkpointer)

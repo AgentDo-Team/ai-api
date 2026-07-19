@@ -20,12 +20,16 @@ class SearchAgentState(TypedDict, total=False):
     """검색 에이전트 서브그래프 내부 상태(약점 1건 단위)."""
 
     weakness: str
+    # 약점의 순번(0-base). 여러 약점을 병렬 fan-out 할 때 프론트가 어느 브랜치인지 구분하는 데 쓴다.
+    weakness_index: int
     queries: list[str]
     tavily_results: list[dict]
     sufficient: bool
     judge_reason: str
     # generate_query 를 몇 번 수행했는지. 1회차는 한국어, 2회차는 영어 검색어를 생성한다.
     attempt: int
+    # 최상위 리듀서에 fan-in 할 약점 1건의 최종 결과. collect 노드가 채운다.
+    search_results: Annotated[list["WeaknessSearchResult"], operator.add]
 
 
 class RecommendationState(TypedDict, total=False):

@@ -10,15 +10,22 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import get_chat_service, verify_company_access
+from app.api.deps import (
+    get_chat_service,
+    get_collaboration_agent_service,
+    verify_company_access,
+)
 from app.common.exceptions import AppException
 from app.schemas.chat import (
     ChatMessageRead,
     ChatRequest,
     ChatSessionRead,
+    WeaknessAgentRequest,
+    WeaknessAgentResumeRequest,
 )
 from app.schemas.response import ApiResponse
 from app.services.chat_service import ChatService
+from app.services.collaboration_agent_service import CollaborationAgentService
 
 router = APIRouter(
     prefix="/api/companies/{company_id}/chat-sessions",
@@ -27,6 +34,9 @@ router = APIRouter(
 )
 
 ServiceDep = Annotated[ChatService, Depends(get_chat_service)]
+AgentServiceDep = Annotated[
+    CollaborationAgentService, Depends(get_collaboration_agent_service)
+]
 CompanyIdPath = Annotated[int, Path(description="회사 ID", ge=1)]
 SessionIdPath = Annotated[int, Path(description="채팅 세션 ID", ge=1)]
 
@@ -133,4 +143,64 @@ async def send_message_stream(
         event_source(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _agent_stream_response(events) -> StreamingResponse:
+    """약점 해결 에이전트 이벤트(AsyncIterator[dict])를 SSE 스트림으로 감싼다."""
+
+    async def event_source():
+        try:
+            async for event in events:
+                yield _sse(event)
+        except AppException as exc:
+            yield _sse(
+                {"type": "error", "message": exc.message, "status": exc.status_code}
+            )
+        except Exception:
+            yield _sse({"type": "error", "message": "에이전트 실행에 실패했습니다."})
+
+    return StreamingResponse(
+        event_source(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post(
+    "/{session_id}/weakness-agent/stream",
+    summary="회사 약점 해결 에이전트 실행 (스트리밍)",
+    description="약점 분석이 끝난 공고를 대상으로, 협력사로 약점을 해소할 수 있는지 판단해 "
+    "협업 제안 메일(이메일 서브그래프) 또는 웹검색 추천 리포트(검색 서브그래프)로 분기한다. "
+    "그래프의 각 노드 진행 상태를 SSE(text/event-stream)로 발행한다. 이메일 분기 시 "
+    "`interrupt` 이벤트(초안)에서 멈추며, `.../weakness-agent/resume` 로 승인/취소해 재개한다. "
+    "SSE 스트림이라 ApiResponse 로 감싸지 않는다.",
+    responses=NOT_FOUND,
+)
+async def run_weakness_agent(
+    company_id: CompanyIdPath,
+    session_id: SessionIdPath,
+    body: WeaknessAgentRequest,
+    service: AgentServiceDep,
+) -> StreamingResponse:
+    return _agent_stream_response(
+        service.run_stream(company_id, session_id, body.bid_notice_id)
+    )
+
+
+@router.post(
+    "/{session_id}/weakness-agent/resume",
+    summary="회사 약점 해결 에이전트 HITL 재개 (스트리밍)",
+    description="이메일 서브그래프의 협업 제안 메일 발송을 승인/취소해 에이전트를 재개한다. "
+    "run 스트림과 같은 세션(thread)을 이어받아 나머지 노드 상태를 SSE 로 발행한다.",
+    responses=NOT_FOUND,
+)
+async def resume_weakness_agent(
+    company_id: CompanyIdPath,
+    session_id: SessionIdPath,
+    body: WeaknessAgentResumeRequest,
+    service: AgentServiceDep,
+) -> StreamingResponse:
+    return _agent_stream_response(
+        service.resume_stream(company_id, session_id, body.approved)
     )

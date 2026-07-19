@@ -7,6 +7,7 @@ compose → interrupt(HITL) → 승인/취소 재개 흐름을 검증한다.
 from types import SimpleNamespace
 
 import pytest
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
 import app.agents.collaboration_email.graph as graph_module
@@ -53,7 +54,8 @@ def patched_graph(monkeypatch):
     monkeypatch.setattr(graph_module, "send_email", fake_send_email)
 
     # llm 은 _FakeService 가 무시하므로 아무 객체나 주입해 OpenAIProvider 생성을 피한다.
-    graph = build_collaboration_email_graph(llm=object())
+    # 단독 실행 시 HITL interrupt/resume 에는 checkpointer 가 필요하다(임베드 시엔 부모가 제공).
+    graph = build_collaboration_email_graph(llm=object(), checkpointer=InMemorySaver())
     return graph, sent_calls
 
 

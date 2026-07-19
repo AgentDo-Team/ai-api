@@ -24,6 +24,7 @@ from app.db.repositories.search_set_repository import SearchSetRepository
 from app.db.session import async_session_factory, get_session
 from app.llm.openai_provider import OpenAIProvider
 from app.services.chat_service import ChatService
+from app.services.collaboration_agent_service import CollaborationAgentService
 from app.services.company_service import CompanyService
 from app.services.third_filter_service import ThirdFilterService
 
@@ -60,6 +61,14 @@ def get_search_set_repository(session: SessionDep) -> SearchSetRepository:
 
 def get_chat_service(session: SessionDep) -> ChatService:
     return ChatService(
+        session=session,
+        search_set_repo=SearchSetRepository(session),
+        chat_message_repo=ChatMessageRepository(session),
+    )
+
+
+def get_collaboration_agent_service(session: SessionDep) -> CollaborationAgentService:
+    return CollaborationAgentService(
         session=session,
         search_set_repo=SearchSetRepository(session),
         chat_message_repo=ChatMessageRepository(session),

@@ -13,11 +13,12 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 from tavily import AsyncTavilyClient
 
 from app.agents.recommendation_search.schemas import SearchQueries, SufficiencyJudgment
-from app.agents.recommendation_search.state import SearchAgentState
+from app.agents.recommendation_search.state import SearchAgentState, WeaknessSearchResult
 from app.core.config import settings
 from app.llm.base import LLMProvider
 
@@ -58,6 +59,16 @@ def build_search_agent(llm: LLMProvider, tavily: AsyncTavilyClient):
     async def generate_query(state: SearchAgentState) -> dict:
         weakness = state["weakness"]
         attempt = state.get("attempt", 0)
+        get_stream_writer()(
+            {
+                "type": "node",
+                "graph": "search",
+                "node": "generate_query",
+                "weakness_index": state.get("weakness_index"),
+                "weakness": weakness,
+                "label": "검색어 생성 중",
+            }
+        )
         # 1회차 한국어, 2회차는 영어 검색어를 생성
         system = _QUERY_SYSTEM_ENG if attempt >= 1 else _QUERY_SYSTEM
         result = await llm.complete_structured(
@@ -75,6 +86,16 @@ def build_search_agent(llm: LLMProvider, tavily: AsyncTavilyClient):
 
     async def tavily_search(state: SearchAgentState) -> dict:
         queries = state["queries"]
+        get_stream_writer()(
+            {
+                "type": "node",
+                "graph": "search",
+                "node": "tavily_search",
+                "weakness_index": state.get("weakness_index"),
+                "weakness": state["weakness"],
+                "label": "웹 검색 중",
+            }
+        )
         searches = await asyncio.gather(
             *(
                 tavily.search(query=q, max_results=settings.tavily_max_results)
@@ -93,6 +114,16 @@ def build_search_agent(llm: LLMProvider, tavily: AsyncTavilyClient):
         return {"tavily_results": results}
 
     async def judge(state: SearchAgentState) -> dict:
+        get_stream_writer()(
+            {
+                "type": "node",
+                "graph": "search",
+                "node": "judge",
+                "weakness_index": state.get("weakness_index"),
+                "weakness": state["weakness"],
+                "label": "검색결과 충분성 판단 중",
+            }
+        )
         judgment = await llm.complete_structured(
             system=_JUDGE_SYSTEM,
             user=(
@@ -110,15 +141,31 @@ def build_search_agent(llm: LLMProvider, tavily: AsyncTavilyClient):
         return {"sufficient": judgment.sufficient, "judge_reason": judgment.reason}
 
     def route_after_judge(state: SearchAgentState) -> str:
-        """불충분하고 아직 재검색 여지(최대 2회차)가 남았으면 재검색, 아니면 종료."""
+        """불충분하고 아직 재검색 여지(최대 2회차)가 남았으면 재검색, 아니면 결과 수집."""
         if state.get("sufficient") or state.get("attempt", 0) >= 2:
-            return END
+            return "collect"
         return "generate_query"
+
+    async def collect(state: SearchAgentState) -> dict:
+        """약점 1건의 최종 결과를 최상위 리듀서(search_results)에 fan-in 할 형태로 패키징한다.
+
+        메인 그래프에 이 서브그래프를 노드로 직접 임베드하면 이 산출물이 그대로
+        상위 RecommendationState.search_results(operator.add) 로 병합된다.
+        """
+        result: WeaknessSearchResult = {
+            "weakness": state["weakness"],
+            "queries": state.get("queries", []),
+            "tavily_results": state.get("tavily_results", []),
+            "sufficient": state.get("sufficient", False),
+            "judge_reason": state.get("judge_reason", ""),
+        }
+        return {"search_results": [result]}
 
     builder = StateGraph(SearchAgentState)
     builder.add_node("generate_query", generate_query)
     builder.add_node("tavily_search", tavily_search)
     builder.add_node("judge", judge)
+    builder.add_node("collect", collect)
 
     builder.add_edge(START, "generate_query")
     builder.add_edge("generate_query", "tavily_search")
@@ -126,7 +173,8 @@ def build_search_agent(llm: LLMProvider, tavily: AsyncTavilyClient):
     builder.add_conditional_edges(
         "judge",
         route_after_judge,
-        {"generate_query": "generate_query", END: END},
+        {"generate_query": "generate_query", "collect": "collect"},
     )
+    builder.add_edge("collect", END)
 
     return builder.compile()

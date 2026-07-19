@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import logging
 
+from langgraph.config import get_stream_writer
+
 from app.agents.recommendation_search.schemas import CompanyReport
 from app.agents.recommendation_search.state import RecommendationState, WeaknessSearchResult
 from app.llm.base import LLMProvider
@@ -37,6 +39,14 @@ def make_report_node(llm: LLMProvider):
     """리포트 작성 노드 함수를 생성해 반환한다."""
 
     async def report(state: RecommendationState) -> dict:
+        get_stream_writer()(
+            {
+                "type": "node",
+                "graph": "search",
+                "node": "report",
+                "label": "최종 리포트 생성 중",
+            }
+        )
         search_results = state.get("search_results", [])
         user = "\n\n".join(_format_one(item) for item in search_results)
         result = await llm.complete_structured(
