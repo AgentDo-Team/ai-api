@@ -7,12 +7,15 @@
   3. 사용자 메시지 저장 (ChatMessage, role='user') — 채팅방 이력 표시용
   4. 1차 하드 필터링(정형 조건 → bid_notices WHERE)으로 공고 목록 추출
 
-소프트 필터링(유사도 검색)·지연 임베딩은 이후 단계에서 이 서비스에 덧붙인다.
+이후 지연 임베딩과 2차 소프트필터를 실행하고 기존 3차 입력 DTO로 결과를 전달한다.
 """
+
+import logging
 
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.common.exceptions import AppException
 from app.core.enums import ProcurementCategory, SearchSetStatus
 from app.db.models.analysis import ChatMessage
 from app.db.models.bid import BidNotice
@@ -24,7 +27,13 @@ from app.schemas.search import (
     HardFilterCondition,
 )
 from app.services import embedding_service
-from app.services.second_filter_service import SecondFilterService
+from app.services.second_filter_service import (
+    DEFAULT_CANDIDATE_K,
+    DEFAULT_FINAL_K,
+    SecondFilterService,
+)
+
+logger = logging.getLogger(__name__)
 
 # 채팅방 제목 기본값 (자유형식 메시지가 없을 때)
 _DEFAULT_SEARCH_TITLE = "공고 검색"
@@ -152,26 +161,52 @@ async def search_bid_notices(
     """
     search_set = await create_search_session(session, company_id, request)
 
-    # 지연 임베딩: 아직 임베딩 안 된 자사 프로필/프로젝트를 이 시점에 채운다.
-    await embedding_service.ensure_company_embedded(session, company_id)
+    try:
+        # 검색 준비 및 2차 소프트필터 시작 상태를 먼저 기록한다.
+        search_set.status = SearchSetStatus.ONGOING_SECOND_FILTER.value
+        search_set.failure_reason = None
+        session.add(search_set)
+        await session.commit()
 
-    notices = await hard_filter_notices(session, request.filters)
-    items = _to_result_items(notices)
+        # 지연 임베딩: 폼 준비 여부를 검증하고 미임베딩 입력만 한 번 채운다.
+        await embedding_service.ensure_company_embedded(session, company_id)
 
-    # 2차 소프트필터 시작 → 검색세트 상태를 진행중으로 갱신(진행 상태 추적용).
-    search_set.status = SearchSetStatus.ONGOING_SECOND_FILTER.value
-    session.add(search_set)
-    await session.commit()
+        notices = await hard_filter_notices(session, request.filters)
+        items = _to_result_items(notices)
 
-    # 2차 소프트필터: 하드필터 통과 공고를 개요·요구사항 청크 유사도로 랭킹한다.
-    second = SecondFilterService(session)
-    soft_result = await second.run(
-        search_set_id=search_set.id,
-        company_id=company_id,
-        bid_notice_ids=[notice.id for notice in notices],
-        query_text=request.message,
-        top_k=10,  # 공고당 3차로 내려줄 랭킹 청크 수
-    )
+        # 2차 소프트필터: 하드필터 통과 공고를 개요·요구사항 청크 유사도로 랭킹한다.
+        second = SecondFilterService(session)
+        soft_result = await second.run(
+            search_set_id=search_set.id,
+            company_id=company_id,
+            bid_notice_ids=[notice.id for notice in notices],
+            query_text=request.message,
+            candidate_k=DEFAULT_CANDIDATE_K,  # 공고별 RRF 후보 수
+            final_k=DEFAULT_FINAL_K,  # 공고당 3차로 내려줄 최종 랭킹 청크 수
+        )
+
+    except Exception as exc:
+        # DB 오류로 트랜잭션이 실패한 경우에도 상태 기록이 가능하도록 먼저 되돌린다.
+        await session.rollback()
+        persisted = await session.get(SearchSet, search_set.id)
+        if persisted is not None:
+            persisted.status = SearchSetStatus.FAILED.value
+            persisted.failure_reason = (
+                exc.message
+                if isinstance(exc, AppException)
+                else "2차 소프트필터 처리 중 오류가 발생했습니다."
+            )
+            session.add(persisted)
+            await session.commit()
+        if isinstance(exc, AppException):
+            logger.warning(
+                "2차 소프트필터 중단: search_set_id=%s, reason=%s",
+                search_set.id,
+                exc.message,
+            )
+        else:
+            logger.exception("2차 소프트필터 실패: search_set_id=%s", search_set.id)
+        raise
 
     # 공고별 매칭도(aggregate_score)를 soft_score 로 채우고 내림차순 정렬한다.
     score_by_notice = {r.bid_notice_id: r.aggregate_score for r in soft_result.results}

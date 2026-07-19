@@ -1,0 +1,34 @@
+{
+  "case_id": "case-001",
+  "company_id": 2,
+  "bid_notice_ids": [
+    41,
+    159,
+    75,
+    119,
+    122
+  ],
+  "message": "AI 플랫폼과 데이터 분석 경험을 우선",
+  "filters": {},
+  "methods": [
+    "dense",
+    "bm25",
+    "rrf"
+  ],
+  "pool_k": 20,
+  "generated_at": "2026-07-17T02:46:27.328522+00:00",
+  "targets": [
+    {
+      "source": "profile",
+      "id": 2,
+      "text": "기업규모: CompanyScale.SMALL\n주력기술: AI, RAG, LLM 애플리케이션\n보유솔루션: 입찰공고 분석 SaaS\n강점/차별점: 국방 도메인 RAG 구축 경험 다수\n신용등급: CreditRating.A_PLUS\nSP등급: SpGrade.GRADE_1",
+      "embedding_sha256": "f99fa4a290418347ba13827be7832ea5c1eeaaf859444a050c8c188b4d5da102"
+    },
+    {
+      "source": "project",
+      "id": 5,
+      "text": "프로젝트명: 육군 통합 물자관리 시스템 고도화\n고객사: 국방부\n도메인: 국방\n기술스택: Python, FastAPI, PostgreSQL\n주요기능: 재고 예측, 배치 정산\n내용: string\n실적: 처리 속도 40% 개선",
+      "embedding_sha256": "049bb522d3112d8d903d33d70dd2dd768bc759594836f57e376d58251015c0af"
+    }
+  ]
+}

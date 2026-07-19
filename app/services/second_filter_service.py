@@ -37,6 +37,8 @@ RRF_K = 60
 # 소프트필터 도메인 스코프: 사업개요·요구사항 청크만 비교 대상으로 삼는다.
 DOMAIN_TOPICS = ["개요", "요구사항"]
 PREVIEW_LEN = 120
+DEFAULT_CANDIDATE_K = 50
+DEFAULT_FINAL_K = 10
 
 
 @dataclass
@@ -83,14 +85,39 @@ def _nearest_target(
     return best
 
 
+def _dedupe_exact_project_targets(targets: list[_Target]) -> list[_Target]:
+    """Keep the first row for projects whose searchable text is exactly equal.
+
+    Duplicate form rows must not multiply the same evidence in RRF or issue
+    repeated dense queries. Profiles and merely similar projects remain intact.
+    The RDB rows themselves and the response contract are not changed.
+    """
+    seen_project_texts: set[str] = set()
+    unique: list[_Target] = []
+    for target in targets:
+        if target.source != "project":
+            unique.append(target)
+            continue
+        if target.text in seen_project_texts:
+            continue
+        seen_project_texts.add(target.text)
+        unique.append(target)
+    return unique
+
+
 class SecondFilterService:
     def __init__(
         self,
         session: AsyncSession,
         chunk_repo: ChunkRepository | None = None,
+        *,
+        rrf_k: int = RRF_K,
     ) -> None:
+        if rrf_k < 1:
+            raise ValueError("rrf_k must be positive")
         self.session = session
         self.chunk_repo = chunk_repo or ChunkRepository(session)
+        self.rrf_k = rrf_k
 
     async def run(
         self,
@@ -98,31 +125,40 @@ class SecondFilterService:
         company_id: int,
         bid_notice_ids: list[int],
         query_text: str | None = None,
-        top_k: int = 5,
+        candidate_k: int = DEFAULT_CANDIDATE_K,
+        final_k: int = DEFAULT_FINAL_K,
     ) -> SecondFilterResult:
-        """하드필터 통과 공고들에 대해 2차 소프트필터를 수행한다.
+        """하드필터 통과 공고별로 RRF 후보를 만들고 최종 청크만 반환한다.
 
-        매칭도(aggregate_score) 내림차순으로 정렬해 돌려준다.
+        candidate_k는 내부 RRF 후보 수, final_k는 기존 DTO로 전달할 청크 수다.
+        공고는 최종 청크의 aggregate_score 내림차순으로 정렬한다.
         """
-        # 자사 프로필/프로젝트가 아직 임베딩 안 됐으면 이 시점에 채운다(지연 임베딩, 멱등).
-        await embedding_service.ensure_company_embedded(self.session, company_id)
+        if candidate_k < 1 or final_k < 1:
+            raise ValueError("candidate_k and final_k must be positive")
+        if final_k > candidate_k:
+            raise ValueError("final_k must not exceed candidate_k")
+
+        # 회사 입력폼의 지연 임베딩은 상위 검색 오케스트레이션이 한 번만 수행한다.
         targets = await self._load_targets(company_id)
 
         # BM25 는 쿼리당 고정 오버헤드(~150ms)가 커서 공고마다 반복하면 느리다.
         # 쿼리 텍스트별로 전 공고를 한 번에 배치 검색해 그 비용을 최소화한다.
         sparse_by_text = await self._batch_sparse(
-            bid_notice_ids, targets, query_text, top_k
+            bid_notice_ids, targets, query_text, candidate_k
         )
 
         results: list[NoticeSoftResult] = []
         for notice_id in bid_notice_ids:
-            ranked = (
+            candidates = (
                 await self._rank_chunks(
-                    notice_id, targets, query_text, top_k, sparse_by_text
+                    notice_id, targets, query_text, candidate_k, sparse_by_text
                 )
                 if targets
                 else []
             )
+            # 후보 생성과 외부 전달 개수를 분리한다. 현재는 RRF 순서를
+            # 유지한 채 상위 final_k개만 기존 DTO로 전달한다.
+            ranked = candidates[:final_k]
             aggregate = sum(rc.score for rc in ranked)
             results.append(
                 NoticeSoftResult(
@@ -152,7 +188,7 @@ class SecondFilterService:
                 select(CompanyProject).where(
                     CompanyProject.company_id == company_id,
                     CompanyProject.embedding.is_not(None),
-                )
+                ).order_by(CompanyProject.id)
             )
         ).all()
 
@@ -175,26 +211,26 @@ class SecondFilterService:
                     embedding_service.project_text(project),
                 )
             )
-        return targets
+        return _dedupe_exact_project_targets(targets)
 
     async def _batch_sparse(
         self,
         bid_notice_ids: list[int],
         targets: list[_Target],
         query_text: str | None,
-        top_k: int,
+        candidate_k: int,
     ) -> dict[str, dict[int, list[tuple[object, float]]]]:
         """쿼리 텍스트별(타깃 텍스트들 + 자유형식 메시지)로 전 공고 BM25 를 배치 검색한다.
 
         반환: {query_text: {bid_notice_id: [(Chunk, score)]}}. 같은 텍스트는 1회만 검색.
         """
-        fetch = top_k * 2
+        fetch = candidate_k * 2
         texts = {target.text for target in targets if target.text.strip()}
         if query_text and query_text.strip():
             texts.add(query_text)
 
         sparse_by_text: dict[str, dict[int, list[tuple[object, float]]]] = {}
-        for txt in texts:
+        for txt in sorted(texts):
             sparse_by_text[txt] = await self.chunk_repo.sparse_search_multi(
                 bid_notice_ids, txt, per_notice_limit=fetch, l_topics=DOMAIN_TOPICS
             )
@@ -205,7 +241,7 @@ class SecondFilterService:
         bid_notice_id: int,
         targets: list[_Target],
         query_text: str | None,
-        top_k: int,
+        candidate_k: int,
         sparse_by_text: dict[str, dict[int, list[tuple[object, float]]]],
     ) -> list[RankedChunk]:
         """한 공고의 개요·요구사항 청크를 두 층으로 랭킹한다.
@@ -219,14 +255,16 @@ class SecondFilterService:
         모든 순위 리스트를 RRF 로 합산한다. 매칭 타깃(profile/project)은 순위가 아니라
         청크 임베딩과의 실제 코사인 거리로 귀속한다(임베딩 없는 청크는 제외).
         """
-        fetch = top_k * 2  # 융합 여유분
+        fetch = candidate_k * 2  # 융합 여유분
 
         fused: dict[int, float] = {}
         chunk_by_id: dict[int, object] = {}
 
         def fuse(chunk, rank: int) -> None:
             chunk_by_id[chunk.id] = chunk
-            fused[chunk.id] = fused.get(chunk.id, 0.0) + 1.0 / (RRF_K + rank + 1)
+            fused[chunk.id] = fused.get(chunk.id, 0.0) + 1.0 / (
+                self.rrf_k + rank + 1
+            )
 
         # 1층: 타깃마다 dense(임베딩, 공고 단위) + BM25(텍스트, 배치 결과 조회)
         for target in targets:
@@ -247,11 +285,13 @@ class SecondFilterService:
             for rank, (chunk, _score) in enumerate(steer):
                 fuse(chunk, rank)
 
-        # 융합 점수 내림차순으로, 매칭 타깃(코사인 최근접)을 붙여 top_k 조립.
+        # 융합 점수 내림차순으로, 매칭 타깃(코사인 최근접)을 붙여 후보를 조립.
         # 임베딩이 없는 청크(BM25-only 등)는 타깃 귀속이 불가하므로 건너뛴다.
         ranked: list[RankedChunk] = []
-        for chunk_id in sorted(fused, key=lambda cid: fused[cid], reverse=True):
-            if len(ranked) >= top_k:
+        # 점수가 같을 때 chunk_id 오름차순을 보조 키로 사용해 실행마다 같은 결과를 낸다.
+        # 오프라인 벤치마크도 같은 기준을 사용한다.
+        for chunk_id in sorted(fused, key=lambda cid: (-fused[cid], cid)):
+            if len(ranked) >= candidate_k:
                 break
             chunk = chunk_by_id[chunk_id]
             matched = _nearest_target(getattr(chunk, "embedding", None), targets)

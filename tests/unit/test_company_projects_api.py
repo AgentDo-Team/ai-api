@@ -145,6 +145,25 @@ async def test_update_project_of_another_company_returns_404(
     assert response.status_code == 404
 
 
+async def test_update_project_invalidates_existing_embedding(
+    client, company, project_repo
+):
+    created = await client.post(
+        f"/api/companies/{company['id']}/projects", json=PROJECT_BODY
+    )
+    project = project_repo.rows[created.json()["data"]["id"]]
+    project.embedding = [0.1, 0.2]
+
+    response = await client.patch(
+        f"/api/companies/{company['id']}/projects/{project.id}",
+        json={"performance": "처리 속도 60% 개선"},
+    )
+
+    assert response.status_code == 200
+    assert project.embedding is None
+    assert response.json()["data"]["embedded"] is False
+
+
 async def test_delete_project(client, company):
     created = await client.post(
         f"/api/companies/{company['id']}/projects", json=PROJECT_BODY

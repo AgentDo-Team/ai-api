@@ -48,6 +48,12 @@ LEXICAL_INDEXES = (
        WITH (key_field='id', text_fields='{"content":{"tokenizer":{"type":"korean_lindera"}}}')""",
 )
 
+# create_all 은 기존 테이블에 새 컬럼을 추가하지 않으므로 호환 가능한 스키마 보강은
+# 명시적으로 적용한다. 별도 마이그레이션 도구 도입 전까지 사용하는 최소 변경 목록이다.
+SCHEMA_UPGRADES = (
+    "ALTER TABLE search_sets ADD COLUMN IF NOT EXISTS failure_reason TEXT",
+)
+
 
 async def init_db() -> None:
     async with engine.begin() as conn:
@@ -58,6 +64,8 @@ async def init_db() -> None:
         # 2. 전체 테이블 생성
         await conn.run_sync(SQLModel.metadata.create_all)
 
+        for stmt in SCHEMA_UPGRADES:
+            await conn.execute(text(stmt))
         # 3. 기존 테이블에 추가된 컬럼 반영
         for stmt in COLUMN_MIGRATIONS:
             await conn.execute(text(stmt))
@@ -71,7 +79,7 @@ async def init_db() -> None:
             await conn.execute(text(stmt))
 
     await engine.dispose()
-    print("✅ DB 스키마 초기화 완료")
+    print("DB 스키마 초기화 완료")
 
 
 if __name__ == "__main__":

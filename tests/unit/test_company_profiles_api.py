@@ -93,6 +93,25 @@ async def test_update_profile_refreshes_row_after_commit(client, company, sessio
     assert len(session.refreshed) == refreshes_after_create + 1
 
 
+async def test_update_profile_invalidates_existing_embedding(
+    client, company, profile_repo
+):
+    created = await client.post(
+        f"/api/companies/{company['id']}/profile", json=PROFILE_BODY
+    )
+    profile = profile_repo.rows[created.json()["data"]["id"]]
+    profile.embedding = [0.1, 0.2]
+
+    response = await client.patch(
+        f"/api/companies/{company['id']}/profile",
+        json={"target_techs": "AI, RAG, MCP"},
+    )
+
+    assert response.status_code == 200
+    assert profile.embedding is None
+    assert response.json()["data"]["embedded"] is False
+
+
 async def test_update_missing_profile_returns_404(client, company):
     response = await client.patch(
         f"/api/companies/{company['id']}/profile", json={"target_techs": "x"}

@@ -229,3 +229,9 @@ npm-debug.log*
 
 #gmail
 gmail_token.json
+
+# Local retrieval benchmark outputs (timestamped JSON/CSV)
+evaluation/results/
+
+# Downloaded/exported local reranker weights (large, reproducible artifacts)
+evaluation/models/

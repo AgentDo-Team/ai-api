@@ -99,8 +99,15 @@ class CompanyService:
         profile = await self.get_profile(company_id)
         changes = data.model_dump(exclude_unset=True)
 
+        embedding_changed = any(
+            getattr(profile, key) != value for key, value in changes.items()
+        )
+
         for key, value in changes.items():
             setattr(profile, key, value)
+
+        if embedding_changed:
+            profile.embedding = None
 
         await self.profile_repo.add(profile)
         await self.session.commit()
@@ -151,8 +158,15 @@ class CompanyService:
         project = await self.get_project(company_id, project_id)
         changes = data.model_dump(exclude_unset=True)
 
+        embedding_changed = any(
+            getattr(project, key) != value for key, value in changes.items()
+        )
+
         for key, value in changes.items():
             setattr(project, key, value)
+
+        if embedding_changed:
+            project.embedding = None
 
         await self.project_repo.add(project)
         await self.session.commit()
