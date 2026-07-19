@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     embedding_dim: int = 1024
 
+    # Tavily 웹 검색 API 키 (보완점 검색 에이전트에서 사용). .env 의 TAVILY_API_KEY 를 읽는다.
+    tavily_api_key: str = ""
+    # 검색어 1개당 Tavily 가 반환할 최대 결과 수 (0~20).
+    tavily_max_results: int = 3
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
