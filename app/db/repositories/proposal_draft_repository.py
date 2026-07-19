@@ -14,6 +14,6 @@ class ProposalDraftRepository:
     
     async def get_by_proposal_draft_id(self, proposal_draft_id: str) -> ProposalDraft | None:
         result = await self.session.exec(
-            select(ProposalDraft).where(ProposalDraft.proposal_draft_id == proposal_draft_id)
+            select(ProposalDraft).where(ProposalDraft.id == proposal_draft_id)
         )
         return result.first()
