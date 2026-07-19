@@ -304,3 +304,24 @@ class ProposalService:
             raise FileNotFoundError("DB에 기록은 있으나, 서버에 실제 파일이 존재하지 않습니다.")
 
         return file_path, proposal.file_name
+
+    async def get_proposals(self, company_id: int = None, search_set_id: int = None, bid_notice_id: int = None):
+        """제안서 목록 조회 비즈니스 로직"""
+        proposals = await self.repo.get_list(
+            company_id=company_id,
+            search_set_id=search_set_id,
+            bid_notice_id=bid_notice_id
+        )
+        
+        # 프론트엔드에서 쓰기 좋게 필요한 데이터만 정제해서 반환
+        return [
+            {
+                "proposal_id": p.id,
+                "draft_data": p.draft_data,
+                "file_name": p.file_name,
+                "created_at": p.created_at,
+                "search_set_id": p.search_set_id,
+                "bid_notice_id": p.bid_notice_id
+            }
+            for p in proposals
+        ]
