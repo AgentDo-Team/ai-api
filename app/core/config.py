@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     # 검색어 1개당 Tavily 가 반환할 최대 결과 수 (0~20).
     tavily_max_results: int = 3
 
+    # Gmail 발송 설정 (협업 제안 메일 에이전트에서 사용).
+    # gmail_client_secret_file: Google Cloud Console 에서 발급한 OAuth 데스크톱 클라이언트 시크릿 json.
+    # gmail_token_file: 최초 인증(app.clients.gmail_auth) 후 생성되는 access/refresh token json.
+    # gmail_sender_email: 기본 발신자 주소(비우면 인증 계정의 기본 주소로 발송).
+    gmail_client_secret_file: str = "client_secret.json"
+    gmail_token_file: str = "gmail_token.json"
+    gmail_sender_email: str = ""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

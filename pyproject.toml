@@ -29,6 +29,9 @@ dependencies = [
     "langchain-ollama>=1.1.0",
     "tavily-python>=0.7.26",
     "langgraph>=1.2.9",
+    "google-auth>=2.56.0",
+    "google-auth-oauthlib>=1.4.0",
+    "google-api-python-client>=2.198.0",
 ]
 
 [dependency-groups]

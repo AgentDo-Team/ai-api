@@ -58,7 +58,7 @@ def build_search_agent(llm: LLMProvider, tavily: AsyncTavilyClient):
     async def generate_query(state: SearchAgentState) -> dict:
         weakness = state["weakness"]
         attempt = state.get("attempt", 0)
-        # 1회차(attempt=0)는 한국어, 2회차(attempt>=1)는 영어 검색어를 생성한다.
+        # 1회차 한국어, 2회차는 영어 검색어를 생성
         system = _QUERY_SYSTEM_ENG if attempt >= 1 else _QUERY_SYSTEM
         result = await llm.complete_structured(
             system=system,

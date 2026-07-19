@@ -17,6 +17,12 @@ class PartnerCreate(BaseModel):
         description="협력사명",
         examples=["에이전트두 보안연구소"],
     )
+    email: str | None = Field(
+        default=None,
+        max_length=255,
+        description="협력사 담당자 이메일 (협업 제안 메일 수신자)",
+        examples=["contact@agentdo.co.kr"],
+    )
     domain: str | None = Field(
         default=None, max_length=100, description="사업 분야", examples=["정보보안"]
     )
@@ -37,6 +43,9 @@ class PartnerUpdate(BaseModel):
     """부분 수정. 보낸 필드만 반영된다."""
 
     name: str | None = Field(default=None, max_length=200, description="협력사명")
+    email: str | None = Field(
+        default=None, max_length=255, description="협력사 담당자 이메일 (협업 제안 메일 수신자)"
+    )
     domain: str | None = Field(default=None, max_length=100, description="사업 분야")
     tech_stack: str | None = Field(
         default=None, max_length=200, description="보유 기술스택"
@@ -50,6 +59,7 @@ class PartnerRead(BaseModel):
     id: int = Field(description="협력사 ID")
     company_id: int = Field(description="소속 회사 ID")
     name: str
+    email: str | None = None
     domain: str | None = None
     tech_stack: str | None = None
     description: str | None = None

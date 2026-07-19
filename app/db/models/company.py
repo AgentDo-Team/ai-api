@@ -58,6 +58,7 @@ class Partner(SQLModel, table=True):
         )
     )
     name: str = Field(max_length=200, nullable=False)  # 협력사명
+    email: str | None = Field(default=None, max_length=255)  # 협력사 담당자 이메일 (협업 제안 메일 수신자)
     domain: str | None = Field(default=None, max_length=100)  # 사업 분야
     tech_stack: str | None = Field(default=None, max_length=200)  # 보유 기술스택
     description: str | None = Field(default=None, sa_column=Column(Text))  # 상세 설명
