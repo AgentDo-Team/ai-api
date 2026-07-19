@@ -1,6 +1,7 @@
 from __future__ import annotations
+from typing import Optional
 
-from sqlalchemy import text
+from sqlalchemy import and_, or_, text
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -204,3 +205,51 @@ class ChunkRepository:
         chunks = await self.list_by_bid_notice(bid_notice_id)
         for chunk in chunks:
             await self.session.delete(chunk)
+            
+    async def get_chunks_by_topics(
+        self, 
+        bid_notice_id: int, 
+        l_topics: str = None, 
+        s_topics: Optional[list[str]] = None
+    ) -> dict:
+        """
+        특정 공고의 청크 중, 지정된 대분류(l_topic) 또는 소분류(s_topic)를 포함하는 청크를 조회합니다.
+        반환 형태: {"개요": {"추진 배경": "원문...", "현황": "원문..."}, "평가기준": {"기본": "원문..."}}
+        """
+        stmt = (
+            select(Chunk)
+            .where(Chunk.bid_notice_id == bid_notice_id)
+            .where(
+                Chunk.chunk_metadata["l_topic"].astext == l_topics,
+                        Chunk.chunk_metadata["s_topic"].astext.in_(
+                            s_topics
+        )
+    )
+)
+            
+        # 3. DB 쿼리 실행
+        result = await self.session.exec(stmt)
+        chunks = result.all()
+        
+        # 4. LLM이 읽기 편한 사전(Dict) 형태로 데이터 가공
+        parsed_data = {}
+        
+        for chunk in chunks:
+            # 메타데이터가 없을 경우 빈 딕셔너리로 처리
+            meta = chunk.chunk_metadata or {}
+            
+            l_topic = meta.get("l_topic", "개요")
+            s_topic = meta.get("s_topic", "추진 내용") # s_topic이 없는 경우 '기본'으로 할당
+            content = chunk.content or ""
+            
+            # 대분류 키 초기화
+            if l_topic not in parsed_data:
+                parsed_data[l_topic] = {}
+                
+            # 같은 토픽을 가진 청크가 여러 개로 쪼개져 있을 경우, 내용을 이어서 붙임
+            if s_topic in parsed_data[l_topic]:
+                parsed_data[l_topic][s_topic] += f"\n\n{content}"
+            else:
+                parsed_data[l_topic][s_topic] = content
+                
+        return parsed_data

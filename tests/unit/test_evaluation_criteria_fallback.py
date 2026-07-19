@@ -2,9 +2,10 @@
 
 - 규칙 기반 하드필터가 배점표 청크를 찾으면 그 청크 원문으로 세부항목을 추출한다.
 - 못 찾으면(임베딩 검색 없이) 표준 평가표 템플릿을 대체 채점표로 사용하고,
-  콘솔에 대체 사용 메시지를 출력한다.
+  어느 쪽을 썼는지 INFO 로그로 남긴다(진행 상황 추적용).
 """
 
+import logging
 from typing import Any
 
 from app.db.models.bid import Chunk
@@ -55,34 +56,36 @@ _EVAL_TABLE_CONTENT = (
 )
 
 
-async def test_uses_matched_chunk_when_hard_filter_hits(capsys):
+async def test_uses_matched_chunk_when_hard_filter_hits(caplog):
     """배점표 청크가 규칙 기반으로 걸리면 템플릿을 쓰지 않고 그 청크 원문으로 추출한다."""
     chunks = [Chunk(id=1, bid_notice_id=1, chunk_index=0, content=_EVAL_TABLE_CONTENT)]
     llm = RecordingLLM()
     service = make_service(chunks, llm)
 
-    criteria = await service.extract_evaluation_criteria(bid_notice_id=1)
+    with caplog.at_level(logging.INFO, logger="app.services.evaluation_service"):
+        criteria = await service.extract_evaluation_criteria(bid_notice_id=1)
 
     assert [c.name for c in criteria] == ["기술능력"]
     assert llm.last_user == _EVAL_TABLE_CONTENT  # 청크 원문 그대로 사용
-    assert "대체 채점표를 사용합니다" not in capsys.readouterr().out  # 대체 메시지 없음
+    assert "공고 청크에서 발견" in caplog.text
+    assert "대체 채점표 사용" not in caplog.text
 
 
-async def test_falls_back_to_template_when_no_eval_chunk(capsys):
-    """배점표 청크가 없으면 표준 평가표 템플릿을 대체 채점표로 쓰고 콘솔에 알린다."""
+async def test_falls_back_to_template_when_no_eval_chunk(caplog):
+    """배점표 청크가 없으면 표준 평가표 템플릿을 대체 채점표로 쓰고 로그로 알린다."""
     chunks = [
         Chunk(id=1, bid_notice_id=1, chunk_index=0, content="본 사업은 클라우드 전환 사업입니다."),
     ]
     llm = RecordingLLM()
     service = make_service(chunks, llm)
 
-    criteria = await service.extract_evaluation_criteria(bid_notice_id=1)
+    with caplog.at_level(logging.INFO, logger="app.services.evaluation_service"):
+        criteria = await service.extract_evaluation_criteria(bid_notice_id=1)
 
     assert [c.name for c in criteria] == ["기술능력"]
     # 템플릿 원문이 LLM 입력으로 넘어갔는지 확인
     assert llm.last_user == EvaluationService._load_fallback_template_text()
     assert llm.last_user.strip() != ""
 
-    out = capsys.readouterr().out
-    assert "적절한 배점표 청크를 찾지 못해 대체 채점표를 사용합니다" in out
-    assert _FALLBACK_TEMPLATE_FILENAME in out
+    assert "대체 채점표 사용" in caplog.text
+    assert _FALLBACK_TEMPLATE_FILENAME in caplog.text

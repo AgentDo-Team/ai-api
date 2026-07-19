@@ -106,3 +106,5 @@ class SearchSetStatus(str, enum.Enum):
     ONGOING_THIRD_FILTER = "ongoing_third_filter"  # 3차 필터(배점표 채점) 진행 중
     COMPLETED = "completed"  # 3차 필터까지 완료
     FAILED = "failed"  # 2차 소프트필터 중 복구되지 않은 오류 발생
+    ONGOING_REPORT_GENERATION = "ongoing_report_generation"  # 상위 5건 확정 후 적합성 검증/요약 리포트 작성 중
+ 

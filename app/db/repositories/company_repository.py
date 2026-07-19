@@ -61,7 +61,13 @@ class CompanyProjectRepository:
 
     async def get(self, project_id: int) -> CompanyProject | None:
         return await self.session.get(CompanyProject, project_id)
-
+    
+    async def get_by_company_id(self, company_id: int) -> CompanyProject | None:
+        result = await self.session.exec(
+            select(CompanyProject).where(CompanyProject.company_id == company_id)
+        )
+        
+        return result.first()
     async def list_by_company(
         self, company_id: int, limit: int = 20, offset: int = 0
     ) -> list[CompanyProject]:

@@ -5,8 +5,12 @@ from sqlmodel import SQLModel
 from app.api.auth import router as auth_router
 from app.api.search import router as search_router
 from app.common.exception_handlers import register_exception_handlers
+from app.core.logging import setup_logging
 from app.schemas.response import ApiResponse
-from app.api import bids, companies, company_profiles, company_projects, ingest, proposal, third_filter
+from app.api import bids, chat, companies, company_profiles, company_projects, ingest, proposal, third_filter
+
+# uvicorn 이 자체 로깅을 구성한 뒤 이 모듈을 import 하므로, 여기서 불러야 설정이 살아남는다.
+setup_logging()
 
 OPENAPI_TAGS = [
     {
@@ -37,7 +41,14 @@ OPENAPI_TAGS = [
     {
         "name": "bid-notices",
         "description": "공고 검색. 정형 조건 하드 필터링으로 공고를 추출하고 검색 세션(채팅방)을 저장한다."
-    },    
+    },
+    {
+        "name": "chat",
+        "description": (
+            "챗봇 채팅 세션 CRUD + 대화. 세션(채팅방)은 검색 세션(SearchSet)을 재사용하며, "
+            "질문 임베딩→공고 청크 벡터검색→회사 컨텍스트 기반으로 답변을 생성한다."
+        ),
+    },
     {
         "name": "system", 
         "description": "헬스체크 등 시스템 엔드포인트."
@@ -85,6 +96,7 @@ app.include_router(bids.router)
 app.include_router(ingest.router)
 app.include_router(search_router)
 app.include_router(proposal.router)
+app.include_router(chat.router)
 
 
 @app.get("/", tags=["system"], summary="루트")

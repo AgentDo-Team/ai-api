@@ -113,4 +113,14 @@ class SearchSetStatusResponse(BaseModel):
     )
     failure_reason: str | None = Field(
         default=None, description="status가 failed일 때의 안전한 실패 사유"
+    progress_current: int | None = Field(
+        default=None,
+        description=(
+            "3차 필터에서 배점표 채점이 끝난 공고 수. status=ongoing_third_filter 인 동안 "
+            "0 에서 progress_total 까지 오른다. 3차 필터 시작 전에는 null."
+        ),
+    )
+    progress_total: int | None = Field(
+        default=None,
+        description="3차 필터의 채점 대상 공고 수(후보 컷 상한 10). 3차 필터 시작 전에는 null.",
     )
