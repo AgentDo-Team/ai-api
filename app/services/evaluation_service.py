@@ -287,7 +287,7 @@ class EvaluationService:
         # 원점수 합계를 실제 만점 합계로 나눠 0~100 범위로 정규화한다.
         raw_score = sum(r.earned_score for r in results)
         max_possible = sum(r.criterion.max_score for r in results)
-        soft_score = round(raw_score / max_possible * 100) if max_possible > 0 else 0
+        soft_score = min(round(raw_score / max_possible * 100), 100) if max_possible > 0 else 0
         chunk_judgments = [
             {
                 "criterion": r.criterion.name,

@@ -48,6 +48,20 @@ class ChatRequest(BaseModel):
     )
 
 
+class WeaknessAgentRequest(BaseModel):
+    bid_notice_id: int = Field(
+        ge=1,
+        description="약점 해결 에이전트의 대상 공고 ID. 해당 공고에 약점 분석 결과가 있어야 한다.",
+        examples=[1],
+    )
+
+
+class WeaknessAgentResumeRequest(BaseModel):
+    approved: bool = Field(
+        description="협업 제안 메일 발송 승인 여부(HITL). true 면 발송, false 면 취소.",
+    )
+
+
 class ChatMessageRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

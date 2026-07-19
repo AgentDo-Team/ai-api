@@ -10,7 +10,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.api.deps import get_company_service, verify_company_access
-from app.db.models.company import Company, CompanyProfile, CompanyProject
+from app.db.models.company import Company, CompanyProfile, CompanyProject, Partner
 from app.services.company_service import CompanyService
 from main import app
 
@@ -79,6 +79,17 @@ class FakeCompanyProjectRepository(_BaseFakeRepo):
         return ordered[offset : offset + limit]
 
 
+class FakePartnerRepository(_BaseFakeRepo):
+    async def list_by_company(
+        self, company_id: int, limit: int = 20, offset: int = 0
+    ) -> list[Partner]:
+        ordered = sorted(
+            (p for p in self.rows.values() if p.company_id == company_id),
+            key=lambda p: p.id,
+        )
+        return ordered[offset : offset + limit]
+
+
 # --------------------------------------------------------------------------- #
 # Fixtures
 # --------------------------------------------------------------------------- #
@@ -100,17 +111,23 @@ def project_repo() -> FakeCompanyProjectRepository:
 
 
 @pytest.fixture
+def partner_repo() -> FakePartnerRepository:
+    return FakePartnerRepository()
+
+
+@pytest.fixture
 def session() -> FakeSession:
     return FakeSession()
 
 
 @pytest.fixture
-async def client(session, company_repo, profile_repo, project_repo):
+async def client(session, company_repo, profile_repo, project_repo, partner_repo):
     service = CompanyService(
         session=session,
         company_repo=company_repo,
         profile_repo=profile_repo,
         project_repo=project_repo,
+        partner_repo=partner_repo,
     )
     app.dependency_overrides[get_company_service] = lambda: service
     # CRUD 로직 검증에 집중하기 위해 JWT 인증(본인 회사 확인)은 우회한다.

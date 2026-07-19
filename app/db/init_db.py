@@ -25,6 +25,8 @@ from app.db.session import engine
 COLUMN_MIGRATIONS = (
     "ALTER TABLE search_sets ADD COLUMN IF NOT EXISTS progress_current INTEGER",
     "ALTER TABLE search_sets ADD COLUMN IF NOT EXISTS progress_total INTEGER",
+    # 협업 제안 메일 수신자 주소 (app/agents/collaboration_email 서브그래프에서 사용)
+    "ALTER TABLE partners ADD COLUMN IF NOT EXISTS email VARCHAR(255)",
 )
 
 # NULL=미임베딩 벡터 컬럼에 대한 HNSW(cosine) 인덱스

@@ -6,7 +6,7 @@
 
 from app.db.models.analysis import AnalysisResult, ChatMessage
 from app.db.models.bid import BidNotice, Chunk
-from app.db.models.company import Company, CompanyProfile, CompanyProject
+from app.db.models.company import Company, CompanyProfile, CompanyProject, Partner
 from app.db.models.reference import EvalCriteriaReference
 from app.db.models.search import HardFilter, SearchSet
 
@@ -14,6 +14,7 @@ __all__ = [
     "Company",
     "CompanyProfile",
     "CompanyProject",
+    "Partner",
     "SearchSet",
     "HardFilter",
     "BidNotice",

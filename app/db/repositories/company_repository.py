@@ -7,7 +7,7 @@ DB 접근만 담당한다. 존재 여부 판단·중복 처리·임베딩 같은
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.db.models.company import Company, CompanyProfile, CompanyProject
+from app.db.models.company import Company, CompanyProfile, CompanyProject, Partner
 
 
 class CompanyRepository:
@@ -82,3 +82,31 @@ class CompanyProjectRepository:
 
     async def delete(self, project: CompanyProject) -> None:
         await self.session.delete(project)
+
+
+class PartnerRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def add(self, partner: Partner) -> Partner:
+        self.session.add(partner)
+        await self.session.flush()  # id 채우기 (commit 은 서비스에서)
+        return partner
+
+    async def get(self, partner_id: int) -> Partner | None:
+        return await self.session.get(Partner, partner_id)
+
+    async def list_by_company(
+        self, company_id: int, limit: int = 20, offset: int = 0
+    ) -> list[Partner]:
+        result = await self.session.exec(
+            select(Partner)
+            .where(Partner.company_id == company_id)
+            .order_by(Partner.id)
+            .offset(offset)
+            .limit(limit)
+        )
+        return list(result.all())
+
+    async def delete(self, partner: Partner) -> None:
+        await self.session.delete(partner)

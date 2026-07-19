@@ -7,7 +7,7 @@ from app.api.search import router as search_router
 from app.common.exception_handlers import register_exception_handlers
 from app.core.logging import setup_logging
 from app.schemas.response import ApiResponse
-from app.api import bids, chat, companies, company_profiles, company_projects, ingest, proposal, third_filter
+from app.api import bids, chat, companies, company_profiles, company_projects, ingest, partners, proposal, third_filter
 
 # uvicorn 이 자체 로깅을 구성한 뒤 이 모듈을 import 하므로, 여기서 불러야 설정이 살아남는다.
 setup_logging()
@@ -28,6 +28,13 @@ OPENAPI_TAGS = [
         "name": "company-projects",
         "description": (
             "회사 수행 프로젝트(실적) CRUD (회사당 N건). 이후 입찰공고와의 유사도 검색에 사용된다."
+        ),
+    },
+    {
+        "name": "partners",
+        "description": (
+            "회사 협력사 CRUD (회사당 N건). LLM이 공고 약점(weakness) 해결 가능 여부를 "
+            "판단할 때 근거로 사용된다."
         ),
     },
     {
@@ -91,6 +98,7 @@ app.include_router(auth_router)
 app.include_router(companies.router)
 app.include_router(company_profiles.router)
 app.include_router(company_projects.router)
+app.include_router(partners.router)
 app.include_router(third_filter.router)
 app.include_router(bids.router)
 app.include_router(ingest.router)

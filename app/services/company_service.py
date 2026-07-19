@@ -5,11 +5,12 @@ CRUD 단계에서는 임베딩하지 않는다. profile/project 의 embedding �
 """
 
 from app.common.exceptions import AppException
-from app.db.models.company import Company, CompanyProfile, CompanyProject
+from app.db.models.company import Company, CompanyProfile, CompanyProject, Partner
 from app.db.repositories.company_repository import (
     CompanyProfileRepository,
     CompanyProjectRepository,
     CompanyRepository,
+    PartnerRepository,
 )
 from app.schemas.company import (
     CompanyProfileCreate,
@@ -18,6 +19,7 @@ from app.schemas.company import (
     CompanyProjectUpdate,
     CompanyUpdate,
 )
+from app.schemas.partner import PartnerCreate, PartnerUpdate
 
 
 class CompanyService:
@@ -27,11 +29,13 @@ class CompanyService:
         company_repo: CompanyRepository,
         profile_repo: CompanyProfileRepository,
         project_repo: CompanyProjectRepository,
+        partner_repo: PartnerRepository,
     ) -> None:
         self.session = session
         self.company_repo = company_repo
         self.profile_repo = profile_repo
         self.project_repo = project_repo
+        self.partner_repo = partner_repo
 
     # ------------------------------------------------------------------ #
     # Company
@@ -175,4 +179,51 @@ class CompanyService:
     async def delete_project(self, company_id: int, project_id: int) -> None:
         project = await self.get_project(company_id, project_id)
         await self.project_repo.delete(project)
+        await self.session.commit()
+
+    # ------------------------------------------------------------------ #
+    # Partner (회사당 N개)
+    # ------------------------------------------------------------------ #
+
+    async def create_partner(self, company_id: int, data: PartnerCreate) -> Partner:
+        await self.get_company(company_id)
+
+        partner = Partner(company_id=company_id, **data.model_dump())
+
+        await self.partner_repo.add(partner)
+        await self.session.commit()
+        return partner
+
+    async def list_partners(
+        self, company_id: int, limit: int, offset: int
+    ) -> list[Partner]:
+        await self.get_company(company_id)
+        return await self.partner_repo.list_by_company(
+            company_id, limit=limit, offset=offset
+        )
+
+    async def get_partner(self, company_id: int, partner_id: int) -> Partner:
+        await self.get_company(company_id)
+        partner = await self.partner_repo.get(partner_id)
+        # 다른 회사의 협력사는 존재하지 않는 것으로 취급한다.
+        if partner is None or partner.company_id != company_id:
+            raise AppException("협력사를 찾을 수 없습니다.", status_code=404)
+        return partner
+
+    async def update_partner(
+        self, company_id: int, partner_id: int, data: PartnerUpdate
+    ) -> Partner:
+        partner = await self.get_partner(company_id, partner_id)
+        changes = data.model_dump(exclude_unset=True)
+
+        for key, value in changes.items():
+            setattr(partner, key, value)
+
+        await self.partner_repo.add(partner)
+        await self.session.commit()
+        return partner
+
+    async def delete_partner(self, company_id: int, partner_id: int) -> None:
+        partner = await self.get_partner(company_id, partner_id)
+        await self.partner_repo.delete(partner)
         await self.session.commit()
