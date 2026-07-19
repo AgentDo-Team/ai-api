@@ -36,14 +36,22 @@ class ProposalDraft(SQLModel, table=True):
         )
     )  # 매칭된 결과 정보 (1:n)
     
+    company_id: int = Field(
+        sa_column=Column(
+            BigInteger,
+            ForeignKey("companies.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )  #회사 정보
+
     draft_data: dict = Field(
         sa_column=Column(JSONB, nullable=False)
     )  # Pydantic 모델(ProposalDraftData)의 model_dump() 결과가 저장될 JSONB 컬럼
     
-    docx_path: Optional[str] = Field(
+    file_name: Optional[str] = Field(
         default=None,
         sa_column=Column(String(500))
-    )  # 생성된 Word 파일 로컬/보안망 경로
+    ) 
 
     
     created_at: Optional[datetime] = Field(
