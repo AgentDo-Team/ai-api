@@ -2,7 +2,10 @@
 
 약점(weakness) 1건을 입력받아:
   generate_query → tavily_search → judge
-순서로 처리한다. judge 는 충분성 판정을 기록만 하고 항상 종료로 진행한다(재검색 루프 없음).
+순서로 처리한다. judge 가 결과를 불충분(sufficient=false)으로 판정하면
+generate_query → tavily_search 를 한 번 더 수행한다. 이때 1회차는 한국어(_QUERY_SYSTEM),
+2회차는 영어(_QUERY_SYSTEM_ENG) 검색어를 생성해 해외의 더 다양한 결과를 노린다. 재검색은
+최대 1회(총 2회차)까지만 진행한다.
 """
 
 from __future__ import annotations
@@ -54,13 +57,21 @@ def build_search_agent(llm: LLMProvider, tavily: AsyncTavilyClient):
 
     async def generate_query(state: SearchAgentState) -> dict:
         weakness = state["weakness"]
+        attempt = state.get("attempt", 0)
+        # 1회차(attempt=0)는 한국어, 2회차(attempt>=1)는 영어 검색어를 생성한다.
+        system = _QUERY_SYSTEM_ENG if attempt >= 1 else _QUERY_SYSTEM
         result = await llm.complete_structured(
-            system=_QUERY_SYSTEM,
+            system=system,
             user=f"약점: {weakness}",
             response_model=SearchQueries,
         )
-        logger.info("[search] 약점=%r → 검색어=%s", weakness, result.queries)
-        return {"queries": result.queries}
+        logger.info(
+            "[search] 약점=%r (%d회차) → 검색어=%s",
+            weakness,
+            attempt + 1,
+            result.queries,
+        )
+        return {"queries": result.queries, "attempt": attempt + 1}
 
     async def tavily_search(state: SearchAgentState) -> dict:
         queries = state["queries"]
@@ -71,13 +82,14 @@ def build_search_agent(llm: LLMProvider, tavily: AsyncTavilyClient):
             ),
             return_exceptions=True,
         )
-        results: list[dict] = []
+        # 재검색 루프에서 1·2회차 결과를 모두 누적한다.
+        results: list[dict] = list(state.get("tavily_results", []))
         for q, res in zip(queries, searches):
             if isinstance(res, Exception):
                 logger.warning("[search] Tavily 검색 실패 query=%r: %s", q, res)
                 continue
             results.extend(res.get("results", []))
-        logger.info("[search] 약점=%r → 검색결과 %d건", state["weakness"], len(results))
+        logger.info("[search] 약점=%r → 누적 검색결과 %d건", state["weakness"], len(results))
         return {"tavily_results": results}
 
     async def judge(state: SearchAgentState) -> dict:
@@ -95,8 +107,13 @@ def build_search_agent(llm: LLMProvider, tavily: AsyncTavilyClient):
             judgment.sufficient,
             judgment.reason,
         )
-        # 재검색 루프 없이 판정만 기록하고 종료로 진행한다.
         return {"sufficient": judgment.sufficient, "judge_reason": judgment.reason}
+
+    def route_after_judge(state: SearchAgentState) -> str:
+        """불충분하고 아직 재검색 여지(최대 2회차)가 남았으면 재검색, 아니면 종료."""
+        if state.get("sufficient") or state.get("attempt", 0) >= 2:
+            return END
+        return "generate_query"
 
     builder = StateGraph(SearchAgentState)
     builder.add_node("generate_query", generate_query)
@@ -106,6 +123,10 @@ def build_search_agent(llm: LLMProvider, tavily: AsyncTavilyClient):
     builder.add_edge(START, "generate_query")
     builder.add_edge("generate_query", "tavily_search")
     builder.add_edge("tavily_search", "judge")
-    builder.add_edge("judge", END)
+    builder.add_conditional_edges(
+        "judge",
+        route_after_judge,
+        {"generate_query": "generate_query", END: END},
+    )
 
     return builder.compile()

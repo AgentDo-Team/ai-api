@@ -16,6 +16,11 @@ import logging
 from app.agents.recommendation_search.graph import build_recommendation_graph
 
 SAMPLE_WEAKNESSES = [
+    "공고가 요구하는 미국의 펜더(fender) 회사와의 협업 실적이 회사에 없음",
+    "공고가 요구하는 미국의 깁슨(gibson) 회사와의 협업 실적이 회사에 없음",
+]
+
+SAMPLE_WEAKNESSES2 = [
     "공고가 요구하는 대규모 공공 클라우드 전환 구축 실적이 회사에 없음",
     "AI 챗봇/LLM 기반 서비스 구축 경험이 부족함",
 ]

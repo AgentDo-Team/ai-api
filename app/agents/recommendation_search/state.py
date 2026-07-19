@@ -24,6 +24,8 @@ class SearchAgentState(TypedDict, total=False):
     tavily_results: list[dict]
     sufficient: bool
     judge_reason: str
+    # generate_query 를 몇 번 수행했는지. 1회차는 한국어, 2회차는 영어 검색어를 생성한다.
+    attempt: int
 
 
 class RecommendationState(TypedDict, total=False):
