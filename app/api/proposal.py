@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 import urllib
@@ -80,3 +82,30 @@ async def download_proposal(
     except Exception as e:
         # 기타 에러
         raise HTTPException(status_code=500, detail=f"파일 다운로드 중 오류 발생: {str(e)}")
+    
+@router.get("/list", summary="제안서 초안 목록 조회")
+async def get_proposal_list(
+    company_id: Optional[int] = Query(None, description="회사 ID로 필터링 (대시보드용)"),
+    search_set_id: Optional[int] = Query(None, description="검색 세션 ID로 필터링 (특정 채팅방용)"),
+    bid_notice_id: Optional[int] = Query(None, description="공고 ID로 필터링 (특정 공고용)"),
+    session: AsyncSession = Depends(get_session)
+):
+    """
+    생성된 제안서 초안 문서 목록을 조회합니다.
+    (파라미터를 조합하여 원하는 조건의 목록만 가져올 수 있습니다.)
+    """
+    service = ProposalService(session)
+    
+    try:
+        results = await service.get_proposals(
+            company_id=company_id,
+            search_set_id=search_set_id,
+            bid_notice_id=bid_notice_id
+        )
+        
+        return ApiResponse.ok(
+            data=results,
+            message="제안서 목록을 성공적으로 조회했습니다."
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"목록 조회 중 오류 발생: {str(e)}")
