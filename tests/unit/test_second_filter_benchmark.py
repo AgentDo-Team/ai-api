@@ -6,7 +6,6 @@ from pydantic import ValidationError
 from scripts.evaluation.second_filter_benchmark import (
     EvaluationCase,
     Ranking,
-    build_rerank_pair,
     calculate_metrics,
     embedding_sha256,
     rank_notices,
@@ -46,10 +45,24 @@ def test_rank_notices_uses_sum_of_final_chunk_scores():
     assert scores == {10: pytest.approx(0.5), 20: pytest.approx(0.4)}
 
 
-def test_rerank_pair_uses_requirement_as_query_and_company_as_document():
-    query, document = build_rerank_pair("company evidence", "bid requirement", "AI first")
-    assert query == "User preference: AI first\n\nbid requirement"
-    assert document == "company evidence"
+def test_rank_notices_supports_offline_aggregate_alternatives():
+    rankings = {
+        10: Ranking([1, 2, 3], [0.3, 0.2, 0.1]),
+        20: Ranking([4, 5, 6], [0.4, 0.05, 0.01]),
+    }
+
+    ranked_max, _ = rank_notices(rankings, final_k=3, aggregate_method="max")
+    ranked_top3, scores_top3 = rank_notices(
+        rankings, final_k=3, aggregate_method="sum_top_3"
+    )
+    ranked_discounted, _ = rank_notices(
+        rankings, final_k=3, aggregate_method="discounted_sum"
+    )
+
+    assert ranked_max == [20, 10]
+    assert ranked_top3 == [10, 20]
+    assert scores_top3[10] == pytest.approx(0.6)
+    assert ranked_discounted == [10, 20]
 
 
 def test_metrics_include_notice_and_macro_chunk_quality():
@@ -65,6 +78,10 @@ def test_metrics_include_notice_and_macro_chunk_quality():
     assert metrics["notice_mrr"] == pytest.approx(1.0)
     assert metrics["notice_ndcg_at_10"] == pytest.approx(1.0)
     assert metrics["chunk_recall_at_50"] is None
+    assert metrics["chunk_recall_at_10_rel2"] == pytest.approx(1.0)
+    assert metrics["chunk_recall_at_10_rel3"] == pytest.approx(1.0)
+    assert metrics["chunk_hit_rate_at_10_rel3"] == pytest.approx(1.0)
+    assert metrics["chunk_mrr_rel3"] == pytest.approx(1.0)
 
 
 def test_snapshot_detects_changed_company_input():

@@ -1,6 +1,7 @@
 import pytest
 
 from scripts.evaluation.retrieval_metrics import (
+    hit_rate_at_k,
     ndcg_at_k,
     percentile,
     recall_at_k,
@@ -12,6 +13,13 @@ def test_recall_at_k():
     relevance = {10: 3, 20: 2, 30: 1}
     assert recall_at_k([10, 99, 20], relevance, 2) == pytest.approx(1 / 3)
     assert recall_at_k([10, 99, 20], relevance, 3) == pytest.approx(2 / 3)
+    assert recall_at_k([10, 99, 20], relevance, 3, min_relevance=3) == 1.0
+
+
+def test_hit_rate_at_k_with_relevance_threshold():
+    relevance = {10: 3, 20: 2, 30: 1}
+    assert hit_rate_at_k([99, 10], relevance, 2, min_relevance=3) == 1.0
+    assert hit_rate_at_k([99, 20], relevance, 2, min_relevance=3) == 0.0
 
 
 def test_reciprocal_rank():

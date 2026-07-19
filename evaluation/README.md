@@ -88,6 +88,8 @@ uv run python -m scripts.evaluation.second_filter_benchmark --cases evaluation/s
 측정값:
 
 - 공고별 청크 Recall@10/20/50, MRR, nDCG@10의 시나리오 평균
+- 관련도 2 이상 Recall@10
+- 관련도 3 기준 Recall@10/20/50, 후보 Recall, Hit Rate@10, MRR
 - 여러 공고의 Recall@5/10, MRR, nDCG@10
 - 전체 시나리오 검색시간 p50/p95
 - 모든 공고의 최종 top-k 청크 토큰 합계
@@ -99,13 +101,14 @@ uv run python -m scripts.evaluation.second_filter_benchmark --cases evaluation/s
 벤치마크는 현재 DB의 프로필·프로젝트 텍스트와 임베딩 지문을 라벨링 당시 스냅샷과 비교한다.
 입력폼이 수정됐다면 평가를 중단하므로 후보 CSV를 다시 생성하고 다시 라벨링해야 한다.
 
-## 5. 리랭커 비교
+## 5. 현재 운영 기준
 
-현재 기준선과 리랭커를 비교할 때 최종 전달 수는 10개로 유지한다.
+CPU BGE ONNX 리랭커는 실제 케이스에서 지연시간이 크게 증가하고 MRR·nDCG가
+개선되지 않아 제거했다. 현재 운영·평가 대상은 Dense, BM25, RRF이며 최종 전달 수는
+공고별 10개로 유지한다.
 
 ```text
-현재:       RRF 후보 20개 → 최종 10개
-리랭커 실험: RRF 후보 50개 → Reranker → 최종 10개
+Dense + BM25 + 자유형식 BM25 → RRF 후보 50개 → 최종 10개
 ```
 
-API 응답 DTO와 팀원 2에게 전달되는 최종 청크 형식은 바꾸지 않고 후보 단계만 비교한다.
+API 응답 DTO와 팀원 2에게 전달되는 최종 청크 형식은 변경하지 않는다.

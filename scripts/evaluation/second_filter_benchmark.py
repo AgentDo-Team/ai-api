@@ -7,12 +7,13 @@ import asyncio
 import csv
 import hashlib
 import json
+import math
 import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from statistics import mean
-from typing import Any, Literal, Protocol
+from typing import Any, Literal
 
 import tiktoken
 from pydantic import BaseModel, Field, model_validator
@@ -22,6 +23,7 @@ from app.db.models.bid import Chunk
 from app.db.session import async_session_factory, engine
 from scripts.evaluation.retrieval_metrics import (
     ndcg_at_k,
+    hit_rate_at_k,
     percentile,
     recall_at_k,
     reciprocal_rank,
@@ -31,27 +33,10 @@ from app.services.second_filter_service import (
     RRF_K,
     SecondFilterService,
     _Target,
-    _nearest_target,
 )
 
-Method = Literal["dense", "bm25", "rrf", "rrf_bge_onnx_int8"]
-
-
-class PairReranker(Protocol):
-    def load(self) -> None: ...
-
-    def score_pairs(self, pairs: list[tuple[str, str]]) -> list[float]: ...
-
-
-def build_rerank_pair(
-    target_text: str, chunk_text: str, message: str | None
-) -> tuple[str, str]:
-    """Build a retrieval-style (short requirement query, company evidence) pair."""
-    query_parts = []
-    if message and message.strip():
-        query_parts.append(f"User preference: {message.strip()}")
-    query_parts.append(chunk_text.strip())
-    return "\n\n".join(query_parts), target_text.strip()
+Method = Literal["dense", "bm25", "rrf"]
+AggregateMethod = Literal["sum_top_k", "max", "sum_top_3", "discounted_sum"]
 
 
 class TargetSnapshot(BaseModel):
@@ -101,6 +86,10 @@ class Ranking:
 class BenchmarkRow:
     case_id: str
     method: str
+    rrf_k: int
+    candidate_k: int
+    final_k: int
+    aggregate_method: str
     notice_count: int
     ranked_notice_ids: list[int]
     notice_scores: dict[int, float]
@@ -111,7 +100,14 @@ class BenchmarkRow:
     chunk_recall_at_20: float | None
     chunk_recall_at_50: float | None
     chunk_candidate_recall: float | None
+    chunk_recall_at_10_rel2: float | None
+    chunk_recall_at_10_rel3: float | None
+    chunk_recall_at_20_rel3: float | None
+    chunk_recall_at_50_rel3: float | None
+    chunk_candidate_recall_rel3: float | None
+    chunk_hit_rate_at_10_rel3: float | None
     chunk_mrr: float | None
+    chunk_mrr_rel3: float | None
     chunk_ndcg_at_10: float | None
     notice_recall_at_5: float
     notice_recall_at_10: float
@@ -151,11 +147,13 @@ def validate_target_snapshot(case: EvaluationCase, targets: list[_Target]) -> No
         )
 
 
-def _fuse(rankings: list[list[tuple[object, float]]], limit: int) -> Ranking:
+def _fuse(
+    rankings: list[list[tuple[object, float]]], limit: int, rrf_k: int = RRF_K
+) -> Ranking:
     scores: dict[int, float] = {}
     for ranking in rankings:
         for rank, (chunk, _raw_score) in enumerate(ranking):
-            scores[chunk.id] = scores.get(chunk.id, 0.0) + 1 / (RRF_K + rank + 1)
+            scores[chunk.id] = scores.get(chunk.id, 0.0) + 1 / (rrf_k + rank + 1)
     ordered = sorted(scores, key=lambda chunk_id: (-scores[chunk_id], chunk_id))[:limit]
     return Ranking(ordered, [scores[chunk_id] for chunk_id in ordered])
 
@@ -167,10 +165,10 @@ async def retrieve_scenario(
     method: Method,
     targets: list[_Target],
     candidate_k: int,
-    reranker: PairReranker | None = None,
 ) -> dict[int, Ranking]:
     """Run a retrieval method while preserving production multi-notice batching."""
     fetch = candidate_k * 2
+    rrf_k = getattr(service, "rrf_k", RRF_K)
     rankings: dict[int, Ranking] = {}
 
     if method == "dense":
@@ -181,7 +179,7 @@ async def retrieve_scenario(
                 )
                 for target in targets
             ]
-            rankings[notice_id] = _fuse(lists, candidate_k)
+            rankings[notice_id] = _fuse(lists, candidate_k, rrf_k)
         return rankings
 
     texts = sorted({target.text for target in targets if target.text.strip()})
@@ -197,7 +195,9 @@ async def retrieve_scenario(
         }
         for notice_id in notice_ids:
             rankings[notice_id] = _fuse(
-                [by_notice.get(notice_id, []) for by_notice in sparse.values()], candidate_k
+                [by_notice.get(notice_id, []) for by_notice in sparse.values()],
+                candidate_k,
+                rrf_k,
             )
         return rankings
 
@@ -210,78 +210,35 @@ async def retrieve_scenario(
             [item.chunk_id for item in ranked], [item.score for item in ranked]
         )
 
-    if method == "rrf_bge_onnx_int8":
-        if reranker is None:
-            raise ValueError("rrf_bge_onnx_int8 requires a reranker")
-        rankings = await rerank_scenario(
-            service, rankings, targets, message, reranker
-        )
     return rankings
 
 
-async def rerank_scenario(
-    service: SecondFilterService,
+def rank_notices(
     rankings: dict[int, Ranking],
-    targets: list[_Target],
-    message: str | None,
-    reranker: PairReranker,
-) -> dict[int, Ranking]:
-    """Rerank every RRF candidate against its nearest company input target."""
-    candidate_ids = {
-        chunk_id for ranking in rankings.values() for chunk_id in ranking.chunk_ids
-    }
-    if not candidate_ids:
-        return rankings
-    chunks = list(
-        (
-            await service.session.exec(
-                select(Chunk).where(Chunk.id.in_(candidate_ids))
-            )
-        ).all()
-    )
-    chunk_by_id = {chunk.id: chunk for chunk in chunks}
-    target_by_key = {(target.source, target.id): target for target in targets}
+    final_k: int,
+    aggregate_method: AggregateMethod = "sum_top_k",
+) -> tuple[list[int], dict[int, float]]:
+    """Rank notices without changing the chunk/output contract.
 
-    refs: list[tuple[int, int, int]] = []
-    pairs: list[tuple[str, str]] = []
-    for notice_id, ranking in rankings.items():
-        for original_rank, chunk_id in enumerate(ranking.chunk_ids):
-            chunk = chunk_by_id.get(chunk_id)
-            if chunk is None:
-                continue
-            matched = _nearest_target(chunk.embedding, targets)
-            if matched is None:
-                continue
-            target = target_by_key[matched]
-            refs.append((notice_id, chunk_id, original_rank))
-            pairs.append(
-                build_rerank_pair(target.text, chunk.content or "", message)
-            )
+    Alternative aggregation is benchmark-only until it wins on multiple
+    independently labelled company scenarios.
+    """
 
-    scores = await asyncio.to_thread(reranker.score_pairs, pairs)
-    if len(scores) != len(refs):
-        raise ValueError("reranker returned a different number of scores")
+    def aggregate(ranking: Ranking) -> float:
+        values = ranking.scores[:final_k]
+        if not values:
+            return 0.0
+        if aggregate_method == "max":
+            return max(values)
+        if aggregate_method == "sum_top_3":
+            return sum(values[:3])
+        if aggregate_method == "discounted_sum":
+            return sum(score / math.log2(rank + 2) for rank, score in enumerate(values))
+        if aggregate_method == "sum_top_k":
+            return sum(values)
+        raise ValueError(f"unknown aggregate method: {aggregate_method}")
 
-    by_notice: dict[int, list[tuple[int, float, int]]] = {
-        notice_id: [] for notice_id in rankings
-    }
-    for (notice_id, chunk_id, original_rank), score in zip(refs, scores, strict=True):
-        by_notice[notice_id].append((chunk_id, float(score), original_rank))
-
-    reranked: dict[int, Ranking] = {}
-    for notice_id, items in by_notice.items():
-        ordered = sorted(items, key=lambda item: (-item[1], item[2], item[0]))
-        reranked[notice_id] = Ranking(
-            [item[0] for item in ordered], [item[1] for item in ordered]
-        )
-    return reranked
-
-
-def rank_notices(rankings: dict[int, Ranking], final_k: int) -> tuple[list[int], dict[int, float]]:
-    scores = {
-        notice_id: sum(ranking.scores[:final_k])
-        for notice_id, ranking in rankings.items()
-    }
+    scores = {notice_id: aggregate(ranking) for notice_id, ranking in rankings.items()}
     return sorted(scores, key=lambda notice_id: (-scores[notice_id], notice_id)), scores
 
 
@@ -295,13 +252,12 @@ def calculate_metrics(
     ranked_notice_ids: list[int],
     candidate_k: int,
 ) -> dict[str, float | None]:
-    judged = [
-        (notice_id, labels)
-        for notice_id, labels in case.chunk_relevance.items()
-        if any(grade > 0 for grade in labels.values())
-    ]
-
-    def chunk_metric(metric) -> float | None:
+    def chunk_metric(metric, min_relevance: int = 1) -> float | None:
+        judged = [
+            (notice_id, labels)
+            for notice_id, labels in case.chunk_relevance.items()
+            if any(grade >= min_relevance for grade in labels.values())
+        ]
         return _macro([metric(rankings[nid].chunk_ids, labels) for nid, labels in judged])
 
     return {
@@ -314,7 +270,28 @@ def calculate_metrics(
         "chunk_candidate_recall": chunk_metric(
             lambda ids, rel: recall_at_k(ids, rel, candidate_k)
         ),
+        "chunk_recall_at_10_rel2": chunk_metric(
+            lambda ids, rel: recall_at_k(ids, rel, 10, min_relevance=2), 2
+        ) if candidate_k >= 10 else None,
+        "chunk_recall_at_10_rel3": chunk_metric(
+            lambda ids, rel: recall_at_k(ids, rel, 10, min_relevance=3), 3
+        ) if candidate_k >= 10 else None,
+        "chunk_recall_at_20_rel3": chunk_metric(
+            lambda ids, rel: recall_at_k(ids, rel, 20, min_relevance=3), 3
+        ) if candidate_k >= 20 else None,
+        "chunk_recall_at_50_rel3": chunk_metric(
+            lambda ids, rel: recall_at_k(ids, rel, 50, min_relevance=3), 3
+        ) if candidate_k >= 50 else None,
+        "chunk_candidate_recall_rel3": chunk_metric(
+            lambda ids, rel: recall_at_k(ids, rel, candidate_k, min_relevance=3), 3
+        ),
+        "chunk_hit_rate_at_10_rel3": chunk_metric(
+            lambda ids, rel: hit_rate_at_k(ids, rel, 10, min_relevance=3), 3
+        ) if candidate_k >= 10 else None,
         "chunk_mrr": chunk_metric(reciprocal_rank),
+        "chunk_mrr_rel3": chunk_metric(
+            lambda ids, rel: reciprocal_rank(ids, rel, min_relevance=3), 3
+        ),
         "chunk_ndcg_at_10": chunk_metric(lambda ids, rel: ndcg_at_k(ids, rel, 10)),
         "notice_recall_at_5": recall_at_k(ranked_notice_ids, case.notice_relevance, 5),
         "notice_recall_at_10": recall_at_k(ranked_notice_ids, case.notice_relevance, 10),
@@ -347,29 +324,16 @@ async def benchmark_case(
     final_k: int,
     warmup: int,
     repeat: int,
-    reranker_model_path: Path,
-    reranker_batch_size: int,
-    reranker_max_length: int,
+    rrf_k: int = RRF_K,
+    aggregate_method: AggregateMethod = "sum_top_k",
 ) -> BenchmarkRow:
     labeled_chunks = await _load_and_validate_chunks(case)
     async with async_session_factory() as session:
-        service = SecondFilterService(session)
+        service = SecondFilterService(session, rrf_k=rrf_k)
         targets = await service._load_targets(case.company_id)
         if not targets:
             raise ValueError(f"{case.case_id}: company has no embedded profile/project")
         validate_target_snapshot(case, targets)
-        reranker: PairReranker | None = None
-        if method == "rrf_bge_onnx_int8":
-            from scripts.evaluation.bge_onnx_reranker import BgeOnnxInt8Reranker
-
-            reranker = BgeOnnxInt8Reranker(
-                reranker_model_path,
-                batch_size=reranker_batch_size,
-                max_length=reranker_max_length,
-            )
-            # Model startup is paid once by the application lifespan and is not
-            # part of per-search latency.
-            await asyncio.to_thread(reranker.load)
         for _ in range(warmup):
             await retrieve_scenario(
                 service,
@@ -378,7 +342,6 @@ async def benchmark_case(
                 method,
                 targets,
                 candidate_k,
-                reranker,
             )
         latencies: list[float] = []
         rankings: dict[int, Ranking] = {}
@@ -391,11 +354,12 @@ async def benchmark_case(
                 method,
                 targets,
                 candidate_k,
-                reranker,
             )
             latencies.append((time.perf_counter() - started) * 1000)
 
-        ranked_notice_ids, notice_scores = rank_notices(rankings, final_k)
+        ranked_notice_ids, notice_scores = rank_notices(
+            rankings, final_k, aggregate_method
+        )
         metrics = calculate_metrics(case, rankings, ranked_notice_ids, candidate_k)
 
         final_ids = {nid: ranking.chunk_ids[:final_k] for nid, ranking in rankings.items()}
@@ -408,6 +372,10 @@ async def benchmark_case(
     return BenchmarkRow(
         case_id=case.case_id,
         method=method,
+        rrf_k=rrf_k,
+        candidate_k=candidate_k,
+        final_k=final_k,
+        aggregate_method=aggregate_method,
         notice_count=len(case.bid_notice_ids),
         ranked_notice_ids=ranked_notice_ids,
         notice_scores={nid: round(score, 6) for nid, score in notice_scores.items()},
@@ -450,9 +418,8 @@ async def main_async(args: argparse.Namespace) -> None:
             args.final_k,
             args.warmup,
             args.repeat,
-            args.reranker_model_path,
-            args.reranker_batch_size,
-            args.reranker_max_length,
+            args.rrf_k,
+            args.aggregate_method,
         )
         for case in cases for method in methods
     ]
@@ -468,15 +435,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--methods", default="dense,bm25,rrf")
     parser.add_argument("--candidate-k", type=int, default=50)
     parser.add_argument("--final-k", type=int, default=10)
+    parser.add_argument("--rrf-k", type=int, default=RRF_K)
+    parser.add_argument(
+        "--aggregate-method",
+        choices=("sum_top_k", "max", "sum_top_3", "discounted_sum"),
+        default="sum_top_k",
+    )
     parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument("--repeat", type=int, default=10)
-    parser.add_argument(
-        "--reranker-model-path",
-        type=Path,
-        default=Path("evaluation/models/bge-reranker-v2-m3-onnx-int8"),
-    )
-    parser.add_argument("--reranker-batch-size", type=int, default=8)
-    parser.add_argument("--reranker-max-length", type=int, default=512)
     parser.add_argument("--output-dir", type=Path, default=Path("evaluation/results"))
     return parser.parse_args()
 

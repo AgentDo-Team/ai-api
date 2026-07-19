@@ -4,7 +4,10 @@ import pytest
 
 from app.common.exceptions import AppException
 from app.db.models.company import CompanyProfile, CompanyProject
-from app.services.embedding_service import _validate_company_inputs
+from app.services.embedding_service import (
+    _validate_company_inputs,
+    _validate_embedding_vectors,
+)
 
 
 def test_validate_company_inputs_requires_profile():
@@ -38,3 +41,13 @@ def test_validate_company_inputs_accepts_ready_company():
     projects = [CompanyProject(id=1, company_id=1, title="공공 RAG 구축")]
 
     _validate_company_inputs(profile, projects)
+
+
+def test_validate_embedding_vectors_rejects_missing_result():
+    with pytest.raises(AppException, match="결과 수"):
+        _validate_embedding_vectors([{"dense": [1.0]}], expected_count=2)
+
+
+def test_validate_embedding_vectors_rejects_empty_vector():
+    with pytest.raises(AppException, match="비어 있는"):
+        _validate_embedding_vectors([{"dense": []}], expected_count=1)

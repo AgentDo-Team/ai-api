@@ -85,14 +85,39 @@ def _nearest_target(
     return best
 
 
+def _dedupe_exact_project_targets(targets: list[_Target]) -> list[_Target]:
+    """Keep the first row for projects whose searchable text is exactly equal.
+
+    Duplicate form rows must not multiply the same evidence in RRF or issue
+    repeated dense queries. Profiles and merely similar projects remain intact.
+    The RDB rows themselves and the response contract are not changed.
+    """
+    seen_project_texts: set[str] = set()
+    unique: list[_Target] = []
+    for target in targets:
+        if target.source != "project":
+            unique.append(target)
+            continue
+        if target.text in seen_project_texts:
+            continue
+        seen_project_texts.add(target.text)
+        unique.append(target)
+    return unique
+
+
 class SecondFilterService:
     def __init__(
         self,
         session: AsyncSession,
         chunk_repo: ChunkRepository | None = None,
+        *,
+        rrf_k: int = RRF_K,
     ) -> None:
+        if rrf_k < 1:
+            raise ValueError("rrf_k must be positive")
         self.session = session
         self.chunk_repo = chunk_repo or ChunkRepository(session)
+        self.rrf_k = rrf_k
 
     async def run(
         self,
@@ -186,7 +211,7 @@ class SecondFilterService:
                     embedding_service.project_text(project),
                 )
             )
-        return targets
+        return _dedupe_exact_project_targets(targets)
 
     async def _batch_sparse(
         self,
@@ -237,7 +262,9 @@ class SecondFilterService:
 
         def fuse(chunk, rank: int) -> None:
             chunk_by_id[chunk.id] = chunk
-            fused[chunk.id] = fused.get(chunk.id, 0.0) + 1.0 / (RRF_K + rank + 1)
+            fused[chunk.id] = fused.get(chunk.id, 0.0) + 1.0 / (
+                self.rrf_k + rank + 1
+            )
 
         # 1층: 타깃마다 dense(임베딩, 공고 단위) + BM25(텍스트, 배치 결과 조회)
         for target in targets:
@@ -261,7 +288,9 @@ class SecondFilterService:
         # 융합 점수 내림차순으로, 매칭 타깃(코사인 최근접)을 붙여 후보를 조립.
         # 임베딩이 없는 청크(BM25-only 등)는 타깃 귀속이 불가하므로 건너뛴다.
         ranked: list[RankedChunk] = []
-        for chunk_id in sorted(fused, key=lambda cid: fused[cid], reverse=True):
+        # 점수가 같을 때 chunk_id 오름차순을 보조 키로 사용해 실행마다 같은 결과를 낸다.
+        # 오프라인 벤치마크도 같은 기준을 사용한다.
+        for chunk_id in sorted(fused, key=lambda cid: (-fused[cid], cid)):
             if len(ranked) >= candidate_k:
                 break
             chunk = chunk_by_id[chunk_id]

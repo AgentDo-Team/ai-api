@@ -7,21 +7,45 @@ from collections.abc import Sequence
 
 
 def recall_at_k(
-    ranked_ids: Sequence[int], relevance: dict[int, int], k: int
+    ranked_ids: Sequence[int],
+    relevance: dict[int, int],
+    k: int,
+    min_relevance: int = 1,
 ) -> float:
-    """관련도 1 이상인 정답 중 top-k에 포함된 비율."""
-    relevant = {chunk_id for chunk_id, grade in relevance.items() if grade > 0}
+    """min_relevance 이상인 정답 중 top-k에 포함된 비율."""
+    relevant = {
+        chunk_id for chunk_id, grade in relevance.items() if grade >= min_relevance
+    }
     if not relevant:
-        raise ValueError("관련도 1 이상인 정답 청크가 필요합니다.")
+        raise ValueError(f"관련도 {min_relevance} 이상인 정답 청크가 필요합니다.")
     retrieved = set(ranked_ids[:k])
     return len(relevant & retrieved) / len(relevant)
 
 
-def reciprocal_rank(ranked_ids: Sequence[int], relevance: dict[int, int]) -> float:
-    """첫 관련 청크 순위의 역수. 검색하지 못하면 0."""
-    relevant = {chunk_id for chunk_id, grade in relevance.items() if grade > 0}
+def hit_rate_at_k(
+    ranked_ids: Sequence[int],
+    relevance: dict[int, int],
+    k: int,
+    min_relevance: int = 1,
+) -> float:
+    """top-k에 기준 이상의 정답이 하나라도 있으면 1, 없으면 0."""
+    relevant = {
+        chunk_id for chunk_id, grade in relevance.items() if grade >= min_relevance
+    }
     if not relevant:
-        raise ValueError("관련도 1 이상인 정답 청크가 필요합니다.")
+        raise ValueError(f"관련도 {min_relevance} 이상인 정답 청크가 필요합니다.")
+    return float(bool(relevant & set(ranked_ids[:k])))
+
+
+def reciprocal_rank(
+    ranked_ids: Sequence[int], relevance: dict[int, int], min_relevance: int = 1
+) -> float:
+    """첫 관련 청크 순위의 역수. 검색하지 못하면 0."""
+    relevant = {
+        chunk_id for chunk_id, grade in relevance.items() if grade >= min_relevance
+    }
+    if not relevant:
+        raise ValueError(f"관련도 {min_relevance} 이상인 정답 청크가 필요합니다.")
     for rank, chunk_id in enumerate(ranked_ids, start=1):
         if chunk_id in relevant:
             return 1.0 / rank

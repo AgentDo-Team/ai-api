@@ -9,20 +9,48 @@ from collections import defaultdict
 from pathlib import Path
 
 
+def _context_candidates(path: Path) -> list[Path]:
+    candidates = [
+        path.with_suffix(".context.json"),
+        Path("evaluation/labels") / path.with_suffix(".context.json").name,
+    ]
+    stem = path.stem
+    for suffix in ("-corrected", ".final", ".prelabels"):
+        if stem.endswith(suffix):
+            original_name = f"{stem.removesuffix(suffix)}.context.json"
+            candidates.extend(
+                [path.with_name(original_name), Path("evaluation/labels") / original_name]
+            )
+    return candidates
+
+
+def _dedupe_target_snapshot(targets: list[dict]) -> list[dict]:
+    """Mirror production's exact project-text deduplication in label snapshots."""
+    seen_project_texts: set[str] = set()
+    unique: list[dict] = []
+    for target in targets:
+        if target.get("source") != "project":
+            unique.append(target)
+            continue
+        text = str(target.get("text", ""))
+        if text in seen_project_texts:
+            continue
+        seen_project_texts.add(text)
+        unique.append(target)
+    return unique
+
+
+def _chunk_grade_value(row: dict[str, str]) -> str:
+    if "final_chunk_relevance" in row:
+        return row["final_chunk_relevance"].strip()
+    return row["chunk_relevance"].strip()
+
+
 def build_cases(input_paths: list[Path]) -> list[dict]:
     grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
     contexts: dict[str, dict] = {}
     for path in input_paths:
-        context_name = path.with_suffix(".context.json").name
-        context_candidates = [
-            path.with_suffix(".context.json"),
-            Path("evaluation/labels") / context_name,
-        ]
-        if path.stem.endswith("-corrected"):
-            original_name = f"{path.stem.removesuffix('-corrected')}.context.json"
-            context_candidates.extend(
-                [path.with_name(original_name), Path("evaluation/labels") / original_name]
-            )
+        context_candidates = _context_candidates(path)
         context_path = next(
             (candidate for candidate in context_candidates if candidate.exists()),
             context_candidates[-1],
@@ -55,9 +83,10 @@ def build_cases(input_paths: list[Path]) -> list[dict]:
             notice_relevance[notice_id] = notice_grade
             labels: dict[int, int] = {}
             for row in notice_rows:
-                if not row["chunk_relevance"].strip():
+                grade_value = _chunk_grade_value(row)
+                if not grade_value:
                     raise ValueError(f"{case_id}/{row['chunk_id']}: chunk_relevance is blank")
-                grade = int(row["chunk_relevance"])
+                grade = int(grade_value)
                 if not 0 <= grade <= 3:
                     raise ValueError(f"{case_id}/{row['chunk_id']}: chunk_relevance must be 0..3")
                 labels[int(row["chunk_id"])] = grade
@@ -71,8 +100,8 @@ def build_cases(input_paths: list[Path]) -> list[dict]:
             "filters": json.loads(first["filters_json"] or "{}"),
             "notice_relevance": notice_relevance,
             "chunk_relevance": chunk_relevance,
-            "target_snapshot": context["targets"],
-            "notes": "pooled human judgments",
+            "target_snapshot": _dedupe_target_snapshot(context["targets"]),
+            "notes": "pooled finalized judgments",
         })
     return cases
 

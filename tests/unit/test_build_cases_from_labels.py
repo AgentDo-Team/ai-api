@@ -63,3 +63,38 @@ def test_corrected_csv_uses_original_context_name(tmp_path):
     path.with_suffix(".context.json").rename(tmp_path / "labels.context.json")
     [case] = build_cases([path])
     assert case["case_id"] == "case-1"
+
+
+def test_final_csv_uses_final_label_and_original_context(tmp_path):
+    path = tmp_path / "labels.final.csv"
+    write_labels(path)
+    original_context = tmp_path / "labels.context.json"
+    path.with_suffix(".context.json").rename(original_context)
+    rows = list(csv.DictReader(path.open(encoding="utf-8-sig", newline="")))
+    with path.open("w", encoding="utf-8-sig", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=[*FIELDS, "final_chunk_relevance"])
+        writer.writeheader()
+        for row in rows:
+            row["chunk_relevance"] = ""
+            row["final_chunk_relevance"] = "2"
+            writer.writerow(row)
+
+    [case] = build_cases([path])
+    assert case["chunk_relevance"][10] == {101: 2, 102: 2}
+
+
+def test_exact_duplicate_project_targets_are_deduplicated(tmp_path):
+    path = tmp_path / "labels.csv"
+    write_labels(path)
+    context_path = path.with_suffix(".context.json")
+    context = json.loads(context_path.read_text(encoding="utf-8"))
+    context["targets"].extend(
+        [
+            {"source": "project", "id": 10, "text": "same", "embedding_sha256": "x"},
+            {"source": "project", "id": 11, "text": "same", "embedding_sha256": "x"},
+        ]
+    )
+    context_path.write_text(json.dumps(context), encoding="utf-8")
+
+    [case] = build_cases([path])
+    assert [target["id"] for target in case["target_snapshot"]] == [1, 10]

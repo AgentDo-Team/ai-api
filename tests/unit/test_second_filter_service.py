@@ -15,7 +15,12 @@ from __future__ import annotations
 import pytest
 
 from app.db.models.bid import Chunk
-from app.services.second_filter_service import RRF_K, SecondFilterService, _Target
+from app.services.second_filter_service import (
+    RRF_K,
+    SecondFilterService,
+    _Target,
+    _dedupe_exact_project_targets,
+)
 
 PROFILE_EMB = [1.0, 0.0]
 PROJECT_EMB = [0.0, 1.0]
@@ -43,6 +48,23 @@ def profile_target(text: str = "") -> _Target:
 
 def project_target(text: str = "") -> _Target:
     return _Target("project", 5, PROJECT_EMB, text)
+
+
+def test_exact_duplicate_projects_are_counted_once():
+    targets = [
+        profile_target("same evidence"),
+        _Target("project", 5, PROJECT_EMB, "same evidence"),
+        _Target("project", 6, PROJECT_EMB, "same evidence"),
+        _Target("project", 7, PROJECT_EMB, "different evidence"),
+    ]
+
+    unique = _dedupe_exact_project_targets(targets)
+
+    assert [(target.source, target.id) for target in unique] == [
+        ("profile", 1),
+        ("project", 5),
+        ("project", 7),
+    ]
 
 
 class FakeChunkRepo:

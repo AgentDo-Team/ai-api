@@ -64,6 +64,16 @@ def _validate_company_inputs(
         )
 
 
+def _validate_embedding_vectors(vectors: list[dict], expected_count: int) -> None:
+    """외부 임베딩 응답이 입력 항목과 1:1로 대응하는지 확인한다."""
+    if len(vectors) != expected_count:
+        raise AppException(
+            "임베딩 결과 수가 입력 항목 수와 일치하지 않습니다.", status_code=502
+        )
+    if any(not vector.get("dense") for vector in vectors):
+        raise AppException("비어 있는 임베딩 결과가 반환되었습니다.", status_code=502)
+
+
 async def ensure_company_embedded(session: AsyncSession, company_id: int) -> int:
     """회사의 미임베딩 프로필/프로젝트를 임베딩해 컬럼을 채운다.
 
@@ -97,9 +107,10 @@ async def ensure_company_embedded(session: AsyncSession, company_id: int) -> int
 
     # 3. 임베딩 서버 호출 (입력 순서 = 출력 순서)
     vectors = await embedding_client.embed_texts([text for _, text in targets])
+    _validate_embedding_vectors(vectors, len(targets))
 
     # 4. 결과를 각 객체의 dense 컬럼에 채워 저장 (렉시컬은 BM25가 담당)
-    for (obj, _), vector in zip(targets, vectors):
+    for (obj, _), vector in zip(targets, vectors, strict=True):
         obj.embedding = vector["dense"]
         session.add(obj)
 
