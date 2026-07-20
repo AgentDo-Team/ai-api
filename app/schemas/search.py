@@ -113,6 +113,7 @@ class SearchSetStatusResponse(BaseModel):
     )
     failure_reason: str | None = Field(
         default=None, description="status가 failed일 때의 안전한 실패 사유"
+    )
     progress_current: int | None = Field(
         default=None,
         description=(

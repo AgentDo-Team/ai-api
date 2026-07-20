@@ -117,7 +117,7 @@ async def test_run_stream_email_interrupt_then_resume(monkeypatch):
     assert run_events[-1]["draft"] == draft
     assert not any(e["type"] == "done" for e in run_events)
 
-    resume_events = await _collect(service.resume_stream(1, 10, True))
+    resume_events = await _collect(service.resume_stream(1, 10, 3, True))
     assert any(e.get("node") == "send_email" for e in resume_events)
     done = resume_events[-1]
     assert done["type"] == "done"

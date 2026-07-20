@@ -190,6 +190,25 @@ class ThirdFilterService:
     # ------------------------------------------------------------------ #
 
     async def run(self, req: ThirdFilterRequest) -> ThirdFilterResponse:
+        """오케스트레이션 진입점.
+
+        공고 1건 단위 처리(_evaluate_notice/_summarize_and_save)는 이미 내부에서
+        개별 실패를 흡수하지만, _build_fit_prompt 의 gather 나 _batch_analyze_fit 의
+        배치 LLM 호출처럼 여러 공고를 한 번에 묶어 처리하는 단계는 예외 가드가 없다.
+        이 단계에서 예외가 나면 검색세트가 ONGOING_THIRD_FILTER/ONGOING_REPORT_GENERATION
+        에 멈춘 채로 남아 프론트가 영원히 폴링하게 되므로, 여기서 잡아 FAILED 로 남기고
+        재전파한다.
+        """
+        try:
+            return await self._run(req)
+        except Exception:
+            logger.exception(
+                "[3차] 처리 중 복구 불가능한 오류 발생: search_set=%s", req.search_set_id
+            )
+            await self._set_search_set_status(req.search_set_id, SearchSetStatus.FAILED)
+            raise
+
+    async def _run(self, req: ThirdFilterRequest) -> ThirdFilterResponse:
         skipped: list[SkippedNotice] = []
         self._completed = 0
 

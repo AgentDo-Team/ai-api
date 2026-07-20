@@ -57,6 +57,11 @@ class WeaknessAgentRequest(BaseModel):
 
 
 class WeaknessAgentResumeRequest(BaseModel):
+    bid_notice_id: int = Field(
+        ge=1,
+        description="재개할 약점 해결 에이전트의 대상 공고 ID. run 요청 때와 같은 값이어야 한다.",
+        examples=[1],
+    )
     approved: bool = Field(
         description="협업 제안 메일 발송 승인 여부(HITL). true 면 발송, false 면 취소.",
     )
