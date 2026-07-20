@@ -668,6 +668,25 @@ async def test_reasons_and_summary_are_persisted(fake_session, fake_llm):
     assert [r.model_dump() for r in res.results[0].recommend_reason] == saved.recommend_reason
 
 
+async def test_batch_stage_failure_marks_search_set_failed(fake_session, fake_llm):
+    """4-b(적합성 분석 배치 호출) 처럼 여러 공고를 한 번에 처리하는 단계가 통째로 실패하면,
+    검색세트가 ongoing_report_generation 에 멈춰있지 않고 failed 로 남아야 한다."""
+    seed_notice(1)
+    service = make_service(fake_session, fake_llm, {1: 10})
+
+    async def boom(*, requests, response_model, model=None):
+        raise RuntimeError("llm batch down")
+
+    fake_llm.complete_structured_batch = boom
+
+    req = ThirdFilterRequest(search_set_id=1, company_id=1, results=[notice_input(1, 0.5)])
+    with pytest.raises(RuntimeError):
+        await service.run(req)
+
+    assert tfs.SearchSetRepository.sets[1].status == SearchSetStatus.FAILED.value
+    assert tfs.SearchSetRepository.status_history[-1] == SearchSetStatus.FAILED.value
+
+
 async def test_summary_truncated_to_100_chars(fake_session, fake_llm):
     seed_notice(1)
     fake_llm.summary_text = "가" * 150

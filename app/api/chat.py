@@ -202,5 +202,7 @@ async def resume_weakness_agent(
     service: AgentServiceDep,
 ) -> StreamingResponse:
     return _agent_stream_response(
-        service.resume_stream(company_id, session_id, body.approved)
+        service.resume_stream(
+            company_id, session_id, body.bid_notice_id, body.approved
+        )
     )

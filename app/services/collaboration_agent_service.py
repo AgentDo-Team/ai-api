@@ -58,15 +58,24 @@ class CollaborationAgentService:
             raise AppException("채팅 세션을 찾을 수 없습니다.", status_code=404)
 
     @staticmethod
-    def _config(session_id: int) -> dict:
-        return {"configurable": {"thread_id": f"weakness-agent-{session_id}"}}
+    def _config(session_id: int, bid_notice_id: int) -> dict:
+        """thread_id 에 bid_notice_id 까지 포함해야 한다.
+
+        session_id(검색 세트) 하나에서 여러 공고가 추천되므로, bid_notice_id 를 빼면
+        같은 세션에서 공고 A 를 이메일 HITL interrupt 로 멈춰둔 채 공고 B 로 다시
+        run_stream 을 호출했을 때 체크포인트가 뒤섞여, resume 시 엉뚱한 공고/협력사에
+        메일이 발송될 위험이 있다.
+        """
+        return {
+            "configurable": {"thread_id": f"weakness-agent-{session_id}-{bid_notice_id}"}
+        }
 
     async def run_stream(
         self, company_id: int, session_id: int, bid_notice_id: int
     ) -> AsyncIterator[dict]:
         """에이전트를 시작해 노드 상태를 스트리밍한다. 이메일 분기 시 interrupt 에서 멈춘다."""
         await self._verify_owned(company_id, session_id)
-        config = self._config(session_id)
+        config = self._config(session_id, bid_notice_id)
         inputs = {
             "company_id": company_id,
             "search_set_id": session_id,
@@ -92,11 +101,15 @@ class CollaborationAgentService:
             yield event
 
     async def resume_stream(
-        self, company_id: int, session_id: int, approved: bool
+        self, company_id: int, session_id: int, bid_notice_id: int, approved: bool
     ) -> AsyncIterator[dict]:
-        """HITL interrupt 이후 승인/취소로 재개하고 나머지 노드 상태를 스트리밍한다."""
+        """HITL interrupt 이후 승인/취소로 재개하고 나머지 노드 상태를 스트리밍한다.
+
+        run_stream 을 호출할 때와 같은 bid_notice_id 를 넘겨야 같은 thread(체크포인트)를
+        찾아 재개할 수 있다.
+        """
         await self._verify_owned(company_id, session_id)
-        config = self._config(session_id)
+        config = self._config(session_id, bid_notice_id)
 
         async for mode, chunk in self._astream(
             Command(resume={"approved": approved}), config
