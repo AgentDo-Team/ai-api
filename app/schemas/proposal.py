@@ -22,6 +22,7 @@ class ProposalItem(BaseModel):
     expected_effect: str = Field(description="자사만이 문제를 해결할 수 있는 타사 대비 차별점과 기대효과")
 
 class ProposalDraftData(BaseModel):
+    title: str = Field(description="공고와 자사에 맞는 제안서 초안 제목")
     related_projects: List[RelatedProject] = Field(description="관련 성공 프로젝트 목록")
     proposal_advantage: str = Field(description="제안의 핵심 강점 요약")
     business_summary: str = Field(description="사업 이해 및 요약")
