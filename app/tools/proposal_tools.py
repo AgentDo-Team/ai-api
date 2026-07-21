@@ -62,7 +62,7 @@ async def get_bid_notice(bid_notice_id: int) -> dict:
     """
     async with async_session_factory() as session:
         bid_repo = BidNoticeRepository(session)
-        bid = await bid_repo.get(bid_notice_id)
+        bid = await bid_repo.get_by_id(bid_notice_id)
         
         if not bid:
             return {"error": "공고를 찾을 수 없습니다."}
