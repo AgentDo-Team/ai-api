@@ -47,7 +47,10 @@ class ProposalService:
         tools = [get_company_profile, get_company_projects, get_bid_notice]
         
         llm = ChatOllama(model="qwen3:8b", temperature=0).bind_tools(tools)
-        # llm = ChatOpenAI(model="gpt-5.6 luna", temperature=0).bind_tools(tools)
+        # llm = ChatOpenAI(
+        #     model="gpt-4o-mini", 
+        #     temperature=0,
+        # ).bind_tools(tools)
 
         parser = JsonOutputParser(
             pydantic_object=ProposalDraftData
@@ -61,6 +64,11 @@ class ProposalService:
             - search_set_id: {analysis_result.search_set_id}
             - bid_notice_id: {analysis_result.bid_notice_id}
             - 분석 결과: {analysis_json_str}
+            
+            [매우 중요/엄격한 규칙]
+            1. 최종 결과물은 반드시 완벽한 JSON 포맷(객체)으로만 출력하세요.
+            2. JSON 외에 "네, 알겠습니다", "여기 있습니다" 같은 인사말이나 부가 설명을 절대 포함하지 마세요.
+            3. 마크다운 블록(```json ... ```)도 쓰지 말고 오직 순수한 JSON 중괄호 {{ }} 만 출력하세요.
             필요한 정보가 모두 수집되면 즉시 ProposalDraftData JSON을 생성하세요.
             필요한 정보가 부족하면 적절한 Tool을 호출하고, 같은 Tool을 두 번 이상 호출하지 않습니다.
             충분한 정보가 모이면 최종 응답은 반드시 아래 JSON 형식을 따라야 합니다.
