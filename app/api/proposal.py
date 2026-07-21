@@ -15,7 +15,7 @@ router = APIRouter(prefix="/proposal", tags=["proposal"])
 
 @router.post("/generate", summary="제안서 초안 생성 전체 파이프라인")
 async def generate_proposal(
-    analysis_result_id: int,
+    bid_notice_id: int,
     company_id:int,
     session: AsyncSession = Depends(get_session)
 ):
@@ -27,7 +27,7 @@ async def generate_proposal(
 
     try:
         # 서비스의 통합 파이프라인 호출
-        result = await service.process_proposal_generation(analysis_result_id, company_id)
+        result = await service.process_proposal_generation(bid_notice_id, company_id)
         
         # 성공 응답
         return ApiResponse.ok(
@@ -85,9 +85,7 @@ async def download_proposal(
     
 @router.get("/list", summary="제안서 초안 목록 조회")
 async def get_proposal_list(
-    company_id: Optional[int] = Query(None, description="회사 ID로 필터링 (대시보드용)"),
-    search_set_id: Optional[int] = Query(None, description="검색 세션 ID로 필터링 (특정 채팅방용)"),
-    bid_notice_id: Optional[int] = Query(None, description="공고 ID로 필터링 (특정 공고용)"),
+    company_id:int,
     session: AsyncSession = Depends(get_session)
 ):
     """
@@ -99,8 +97,6 @@ async def get_proposal_list(
     try:
         results = await service.get_proposals(
             company_id=company_id,
-            search_set_id=search_set_id,
-            bid_notice_id=bid_notice_id
         )
         
         return ApiResponse.ok(
