@@ -4,6 +4,7 @@ from docx import Document
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 import time
 from app.db.models.analysis import AnalysisResult
@@ -46,6 +47,7 @@ class ProposalService:
         tools = [get_company_profile, get_company_projects, get_bid_notice]
         
         llm = ChatOllama(model="qwen3:8b", temperature=0).bind_tools(tools)
+        # llm = ChatOpenAI(model="gpt-5.6 luna", temperature=0).bind_tools(tools)
 
         parser = JsonOutputParser(
             pydantic_object=ProposalDraftData
@@ -77,7 +79,7 @@ class ProposalService:
             for tool in tools
         }
 
-        max_iterations = 2
+        max_iterations = 5
         final_response = None
 
         for i in range(max_iterations):
@@ -134,6 +136,8 @@ class ProposalService:
                     )
 
                 except Exception as e:
+                    error_msg = f"Tool Error ({tool_name}): {str(e)}"
+                    print(f"🚨 [디버그] {error_msg}")
                     messages.append(
                         ToolMessage(
                             content=f"Tool Error: {str(e)}",
@@ -243,15 +247,15 @@ class ProposalService:
             print(f"[Error] DB 저장 실패: {e}")
             raise e
         
-    async def process_proposal_generation(self, analysis_result_id: int, company_id:int) -> dict:
+    async def process_proposal_generation(self, bid_notice_id: int, company_id:int) -> dict:
         """
         [통합 파이프라인]
         1. DB 조회 -> 2. LLM 초안 생성 -> 3. DOCX 파일 생성 -> 4. 결과 DB 저장
         """
         # 1. 분석 결과 조회
-        analysis_result = await self.analysis_repo.get(analysis_result_id)
+        analysis_result = await self.analysis_repo.get_by_bid_notice_id(bid_notice_id)
         if not analysis_result:
-            raise ValueError(f"AnalysisResult {analysis_result_id} not found.")
+            raise ValueError(f"AnalysisResult {bid_notice_id} not found.")
 
         # 2. LLM 초안 생성 (JSON 데이터 반환)
         print("[Service] 1. LLM 제안서 초안(JSON) 생성 시작...")
@@ -264,7 +268,7 @@ class ProposalService:
         # 3. DOCX 문서 생성 및 로컬 저장
         print("[Service] 2. DOCX 파일 생성 시작...")
         file_name = await self.save_docx(
-            bid_notice_id=analysis_result.bid_notice_id, 
+            bid_notice_id=bid_notice_id, 
             draft_data=draft_data
         )
 
@@ -305,12 +309,10 @@ class ProposalService:
 
         return file_path, proposal.file_name
 
-    async def get_proposals(self, company_id: int = None, search_set_id: int = None, bid_notice_id: int = None):
+    async def get_proposals(self, company_id: int = None):
         """제안서 목록 조회 비즈니스 로직"""
         proposals = await self.repo.get_list(
-            company_id=company_id,
-            search_set_id=search_set_id,
-            bid_notice_id=bid_notice_id
+            company_id=company_id
         )
         
         # 프론트엔드에서 쓰기 좋게 필요한 데이터만 정제해서 반환
