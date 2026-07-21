@@ -96,5 +96,5 @@ class BidSearchResponse(BaseModel):
     )
     second_filter: SecondFilterResult | None = Field(
         default=None,
-        description="2차 소프트필터 결과(공고별 랭킹 청크). 3차 필터로 그대로 전달 가능",
+        description=("2차 소프트필터 결과(공고별 랭킹 청크). 3차 필터로 그대로 전달 가능"),
     )
