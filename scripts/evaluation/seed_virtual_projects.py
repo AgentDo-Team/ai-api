@@ -1,5 +1,3 @@
-"""Idempotently add clearly marked virtual projects for retrieval evaluation."""
-
 from __future__ import annotations
 
 import argparse

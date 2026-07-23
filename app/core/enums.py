@@ -1,15 +1,11 @@
 import enum
 
-# BidNotice 관련
-# 공고 파싱 상태
 class ParseStatus(str, enum.Enum):
-    PENDING = "PENDING"  # 파싱 완료, 청킹 대기 중
-    CHUNKED = "CHUNKED"  # 청킹 및 벡터 DB 저장 완료
-    EMBEDDED = "EMBEDDED" # 임베딩 완료
-    ERROR = "ERROR"      # 파싱 또는 처리 중 에러 발생
+    PENDING = "PENDING" 
+    CHUNKED = "CHUNKED"  
+    EMBEDDED = "EMBEDDED"
+    ERROR = "ERROR"     
 
-# CompanyProfile 관련
-# 기업 규모
 class CompanyScale(str, enum.Enum):
     LARGE = "LARGE"
     MIDDLE = "MIDDLE"
@@ -24,7 +20,6 @@ class CompanyScale(str, enum.Enum):
         }
         return mapping.get(self.value, "")
 
-# 기업신용평가등급
 class CreditRating(str, enum.Enum):
     AAA = "AAA"
     AA_PLUS = "AA+"
@@ -46,10 +41,8 @@ class CreditRating(str, enum.Enum):
 
     @property
     def description(self) -> str:
-        # 신용등급은 값 자체가 설명이므로 그대로 반환합니다.
         return self.value
 
-# sp등급
 class SpGrade(str, enum.Enum):
     GRADE_3 = "3"
     GRADE_2 = "2"
@@ -65,11 +58,6 @@ class SpGrade(str, enum.Enum):
         return mapping.get(self.value, "")
     
 
-# BidNotice 관련
-# 도메인 분류코드 (나라장터 품목분류번호). 멤버명은 코드값 그 자체(키), value는 프론트
-# 표시용 한글명. 코드가 숫자로 시작해 class 본문 문법(식별자)으로는 못 쓰므로 함수형
-# Enum 생성 방식을 쓴다. 시스템 내부(BidNotice.procurement_clsfc_no 등 DB 컬럼)에서는
-# 코드 문자열 그대로 다루다가, 조회 시 ProcurementCategory[code].value 로 한글명을 얻는다.
 ProcurementCategory = enum.Enum(
     "ProcurementCategory",
     {
@@ -97,14 +85,10 @@ ProcurementCategory = enum.Enum(
     type=str,
 )
 
-
-# ChatMessage의 role
-
-# SearchSet의 status. 채팅방(검색세션) 단위 분석 진행 상태 — 프론트가 폴링으로 확인한다.
 class SearchSetStatus(str, enum.Enum):
-    ONGOING_SECOND_FILTER = "ongoing_second_filter"  # 2차 소프트필터 진행 중
-    ONGOING_THIRD_FILTER = "ongoing_third_filter"  # 3차 필터(배점표 채점) 진행 중
-    COMPLETED = "completed"  # 3차 필터까지 완료
-    FAILED = "failed"  # 2차 소프트필터 중 복구되지 않은 오류 발생
-    ONGOING_REPORT_GENERATION = "ongoing_report_generation"  # 상위 5건 확정 후 적합성 검증/요약 리포트 작성 중
+    ONGOING_SECOND_FILTER = "ongoing_second_filter"  
+    ONGOING_THIRD_FILTER = "ongoing_third_filter"  
+    COMPLETED = "completed"  
+    FAILED = "failed" 
+    ONGOING_REPORT_GENERATION = "ongoing_report_generation"  
  

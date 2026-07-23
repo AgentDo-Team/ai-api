@@ -10,7 +10,6 @@ from app.schemas.rfp_schema import ParseResult
 IS_WIN = os.name == "nt"
 
 def resolve_kordoc_cmd() -> list[str] | None:
-    """kordoc 실행 커맨드를 찾습니다. (Node.js npx 환경)"""
     candidates = []
     if os.environ.get("KORDOC_NPX"):
         candidates.append([os.environ["KORDOC_NPX"], "kordoc"])
@@ -36,7 +35,6 @@ def resolve_kordoc_cmd() -> list[str] | None:
     return None
 
 def parse_file(path: Path, kordoc_cmd: list[str]) -> ParseResult:
-    """다운로드 받은 파일을 kordoc을 이용해 Markdown으로 변환합니다."""
     res = ParseResult(source=str(path))
     try:
         common = dict(capture_output=True, text=True, timeout=600, encoding="utf-8", errors="replace")

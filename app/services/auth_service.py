@@ -1,5 +1,3 @@
-"""회원가입·로그인 비즈니스 로직 (계정 = 회사)."""
-
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -10,7 +8,6 @@ from app.schemas.auth import LoginRequest, SignupRequest
 
 
 async def signup(session: AsyncSession, data: SignupRequest) -> Company:
-    """새 회사 계정을 등록한다. 이메일이 이미 존재하면 409를 발생시킨다."""
     existing = await session.scalar(
         select(Company).where(Company.email == data.email)
     )
@@ -30,11 +27,6 @@ async def signup(session: AsyncSession, data: SignupRequest) -> Company:
 
 
 async def login(session: AsyncSession, data: LoginRequest) -> tuple[str, Company]:
-    """이메일/비밀번호를 검증하고 (액세스 토큰, 계정)을 반환한다.
-
-    이메일이 없거나 비밀번호가 틀리면 동일하게 401을 발생시킨다
-    (어느 쪽이 틀렸는지 노출하지 않기 위함).
-    """
     company = await session.scalar(
         select(Company).where(Company.email == data.email)
     )

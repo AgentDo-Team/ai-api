@@ -1,13 +1,11 @@
 from pydantic import BaseModel, Field
 from typing import List
 
-# 클라이언트(프론트엔드)에서 받을 요청 데이터 모델
 class DraftRequest(BaseModel):
     user_message: str
     bid_notice_id: int
     search_set_id: int
     
-# --- 초안 데이터 (draft_data) ---
 class RelatedProject(BaseModel):
     title: str = Field(description="프로젝트명")
     client: str = Field(description="고객사 이름")

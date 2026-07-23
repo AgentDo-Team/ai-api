@@ -1,18 +1,3 @@
-"""평가기준표 기반 입찰공고 채점 파이프라인.
-
-1~2단계: extract_evaluation_criteria (table_filter 규칙 기반 스캔 + LLM 세부항목 분리)
-         규칙 기반으로 배점표 청크를 못 찾으면 표준 평가표 템플릿을 대체 채점표로 사용한다.
-3~4단계: _build_criterion_prompt (하이브리드 검색으로 항목별 채점 프롬프트 구성, 항목 간 병렬)
-5단계:   전체 항목(x EVAL_K 회차)의 프롬프트를 모아 LLMProvider.complete_structured_batch
-         (랭체인 Runnable.abatch) 로 한 번에 배치 전송 → LLM 요청 수는 그대로지만 개별
-         asyncio.gather 호출 대신 단일 배치 호출로 묶인다. 이후 _apply_guard 로 무근거시 최하점 보정.
-6단계:   _aggregate_criterion (EVAL_K회 반복 후 평균/다수결, 기본 1회)
-전체:    evaluate (문서 전체 오케스트레이션, AnalysisResult 영속화)
-
-동시성: 항목별 프롬프트 구성(DB 조회)은 병렬로 돈다. AsyncSession 은 동시 쿼리를 허용하지
-않으므로 항목마다 session_factory 로 독립 세션을 열어 DB 를 읽고, 배치 LLM 호출 전에 반납한다.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -57,8 +42,6 @@ _JUDGMENT_SYSTEM_PROMPT = (
     "절대로 근거 없이 점수를 지어내지 마라. score 는 0 이상 max_score 이하여야 한다."
 )
 
-# 규칙 기반 하드필터가 배점표 청크를 못 찾을 때 사용할 표준 평가표 템플릿.
-# 임베딩(semantic) 검색이 불안정해, 하이브리드 검색 대신 이 템플릿을 대체 채점표로 쓴다.
 _FALLBACK_TEMPLATE_DIR = (
     Path(__file__).resolve().parents[1] / "rag" / "reference_data" / "eval_criteria_templates"
 )
@@ -66,8 +49,8 @@ _FALLBACK_TEMPLATE_FILENAME = "01_기본제안서_평가표.md"
 
 
 class EvaluationService:
-    EVAL_K = 1  # 항목당 반복 채점 횟수. 2 이상이면 평균/다수결 집계가 의미를 가진다.
-    MAX_CONCURRENT_CRITERIA = 5  # 항목 병렬 채점 상한 (DB 커넥션/LLM rate limit 보호)
+    EVAL_K = 1  
+    MAX_CONCURRENT_CRITERIA = 5  
 
     def __init__(
         self,
@@ -89,13 +72,9 @@ class EvaluationService:
         self.llm = llm
         self.session_factory = session_factory
 
-    # ------------------------------------------------------------------ #
-    # 1~2단계: 평가기준표 탐지 + 세부항목 분리, 입찰공고서에서 평가기준표 보고 list[항목명,설명,만점] 가져옴
-    # ------------------------------------------------------------------ #
 
     async def extract_evaluation_criteria(self, bid_notice_id: int) -> list[EvalCriterion]:
         chunks = await self.chunk_repo.list_by_bid_notice(bid_notice_id)
-        # 1차: 청크에서 '평가기준표'에 해당하는 청크만 규칙 기반으로 추려낸다 (하드 필터)
         matched = [c for c in chunks if c.content and is_eval_criteria_table(c.content)]
 
         if matched:
@@ -106,8 +85,6 @@ class EvaluationService:
             )
             joined_text = "\n\n".join(c.content for c in matched if c.content)
         else:
-            # 하드 필터가 배점표 청크를 하나도 못 찾은 경우.
-            # 임베딩 하이브리드 검색은 결과가 불안정해, 표준 평가표 템플릿을 대체 채점표로 사용한다.
             logger.info(
                 "  [notice=%s] 배점표 탐지: 공고에서 못 찾아 대체 채점표 사용 (template=%s)",
                 bid_notice_id,
@@ -125,34 +102,24 @@ class EvaluationService:
         logger.info(
             "  [notice=%s] 평가항목 분리 완료: %d개", bid_notice_id, len(result.criteria)
         )
-        return result.criteria # criteria: list[EvalCriterion]
-
+        return result.criteria
     @staticmethod
     def _load_fallback_template_text() -> str:
         """대체 채점표(표준 평가표 템플릿) 원문을 읽어온다."""
         path = _FALLBACK_TEMPLATE_DIR / _FALLBACK_TEMPLATE_FILENAME
         return path.read_text(encoding="utf-8")
 
-    # ------------------------------------------------------------------ #
-    # 3~4단계: 세부항목 1개의 채점 프롬프트 구성 (LLM 호출 없음, DB 조회만)
-    # ------------------------------------------------------------------ #
-
     async def _build_criterion_prompt(
         self, bid_notice_id: int, company_id: int, criterion: EvalCriterion
     ) -> str:
-        # EvalCriterion [항목명,설명,만점]
+        
         query_text = criterion.name + (f" {criterion.description}" if criterion.description else "")
 
-        # 항목별 프롬프트 구성은 병렬로 돌므로 공유 세션 대신 항목별 독립 세션에서 DB 를 읽고,
-        # 배치 LLM 호출 전에 세션을 닫아 커넥션을 풀에 반납한다.
         async with self.session_factory() as session:
-            # 평가 항목과 관련된 청크를 추가로 집어넣고 배점표의 항목이 구체적으로 어떤건지 보완
-            # 하이브리드 서치를 통해 상위 5개 청크 가져온다
-            # 이거 지금은 안씀
+  
             search_results = await hybrid_search_chunks(
                 ChunkRepository(session), self.llm, bid_notice_id, query_text, limit=5
             )
-            # 평가항목
             projects = await CompanyProjectRepository(session).list_by_company(
                 company_id, limit=50, offset=0
             )
@@ -162,7 +129,6 @@ class EvaluationService:
 
     @staticmethod
     def _apply_guard(judgment: CriterionJudgment, criterion: EvalCriterion) -> CriterionJudgment:
-        """방어적 가드: 근거 없다면서 점수를 매기거나, 배점을 초과하는 응답은 코드에서 강제 보정한다."""
         if judgment.verdict == "no_evidence" and judgment.score != 0:
             judgment = judgment.model_copy(update={"score": 0})
         return judgment.model_copy(
@@ -197,10 +163,6 @@ class EvaluationService:
             f"[회사 과거 프로젝트]\n{project_lines}"
         )
 
-    # ------------------------------------------------------------------ #
-    # 6단계: K회 반복 후 평균/다수결
-    # 지금은 속도 때문에 해당 반복로직은 작동 안하게 해놨음 ㅠㅠ
-    # ------------------------------------------------------------------ #
 
     @staticmethod
     def _aggregate_criterion(
@@ -223,10 +185,6 @@ class EvaluationService:
             k_runs=runs,
         )
 
-    # ------------------------------------------------------------------ #
-    # 전체 오케스트레이션
-    # ------------------------------------------------------------------ #
-
     async def evaluate(
         self, search_set_id: int, bid_notice_id: int, company_id: int
     ) -> AnalysisResult:
@@ -238,8 +196,6 @@ class EvaluationService:
         criteria = await self.extract_evaluation_criteria(bid_notice_id)
         total = len(criteria)
 
-        # 항목별 프롬프트 구성(DB 조회)은 병렬로 돈다 (항목마다 독립 세션이라 동시 실행
-        # 안전, 세마포어로 상한 제한). LLM 호출은 여기 없다.
         semaphore = asyncio.Semaphore(self.MAX_CONCURRENT_CRITERIA)
 
         async def _build(index: int, criterion: EvalCriterion) -> str:
@@ -256,8 +212,6 @@ class EvaluationService:
         prompts = await asyncio.gather(
             *[_build(i, criterion) for i, criterion in enumerate(criteria, start=1)]
         )
-
-        # 항목(x EVAL_K 회차) 전체를 한 번의 랭체인 abatch 호출로 묶어 LLM 요청을 일괄 전송한다.
         requests = [
             (_JUDGMENT_SYSTEM_PROMPT, prompt) for prompt in prompts for _ in range(self.EVAL_K)
         ]
@@ -283,8 +237,6 @@ class EvaluationService:
             for i, criterion in enumerate(criteria)
         ]
 
-        # 배점표 항목별 만점은 공고마다 원문 그대로 추출되어 제각각이므로(30점 고정이 아님),
-        # 원점수 합계를 실제 만점 합계로 나눠 0~100 범위로 정규화한다.
         raw_score = sum(r.earned_score for r in results)
         max_possible = sum(r.criterion.max_score for r in results)
         soft_score = min(round(raw_score / max_possible * 100), 100) if max_possible > 0 else 0
@@ -301,9 +253,6 @@ class EvaluationService:
             }
             for r in results
         ]
-
-        # 같은 (search_set_id, bid_notice_id) 재평가 시 uq_analysis_searchset_notice 위반을
-        # 피하기 위해 upsert 한다. recommend_reason/weaknesses/summary 는 건드리지 않는다.
         analysis_result = await self.analysis_repo.get_by_search_set_and_notice(
             search_set_id, bid_notice_id
         )

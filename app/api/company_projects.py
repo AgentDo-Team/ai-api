@@ -1,5 +1,3 @@
-"""회사 프로젝트(company_projects) CRUD 엔드포인트. 회사당 N건(1:N)."""
-
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, status

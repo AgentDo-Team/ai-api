@@ -20,11 +20,9 @@ from sqlmodel import Field, SQLModel
 class AnalysisResult(SQLModel, table=True):
     __tablename__ = "analysis_results"
     __table_args__ = (
-        # 하나의 입찰공고에는 하나의 분석만 존재해야 함
         UniqueConstraint(
             "search_set_id", "bid_notice_id", name="uq_analysis_searchset_notice"
         ),
-        # bid_notices RESTRICT 삭제 시 역참조 조회용
         Index("ix_analysis_bid_notice", "bid_notice_id"),
     )
 
@@ -42,22 +40,21 @@ class AnalysisResult(SQLModel, table=True):
     bid_notice_id: int = Field(
         sa_column=Column(
             BigInteger,
-            # 공유 리소스 → 삭제 제한
             ForeignKey("bid_notices.id", ondelete="RESTRICT"),
             nullable=False,
         )
     )
     is_hard_passed: bool | None = Field(default=None, sa_column=Column(Boolean))
-    soft_score: int | None = Field(default=None, sa_column=Column(Integer))  # 점수
+    soft_score: int | None = Field(default=None, sa_column=Column(Integer))  
     chunk_judgments: list[dict[str, Any]] | None = Field(
         default=None, sa_column=Column(JSONB)
-    )  # [{chunk_id, project_id, similarity, verdict, reason}]
+    )  
     recommend_reason: list[dict[str, Any]] | None = Field(
         default=None, sa_column=Column(JSONB)
-    )  # 적합 판정 이유 목록: [{chunk_id, reason, cited_source, cited_id, cited_field}]
+    )  
     weaknesses: list[dict[str, Any]] | None = Field(
         default=None, sa_column=Column(JSONB)
-    )  # 부적합 판정 이유 목록: [{chunk_id, reason, cited_source, cited_id, cited_field}]
+    )  
     summary: str | None = Field(default=None, sa_column=Column(Text))  # 공고 요약
     created_at: datetime | None = Field(
         default=None,
@@ -79,7 +76,7 @@ class ChatMessage(SQLModel, table=True):
             nullable=False,
         )
     )
-    role: str = Field(max_length=20, nullable=False)  # user / assistant / system
+    role: str = Field(max_length=20, nullable=False)  
     content: str | None = Field(default=None, sa_column=Column(Text))
     created_at: datetime | None = Field(
         default=None,

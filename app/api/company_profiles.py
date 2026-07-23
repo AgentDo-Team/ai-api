@@ -1,5 +1,3 @@
-"""회사 프로필(company_profiles) CRUD 엔드포인트. 회사당 1건(1:1)."""
-
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, status

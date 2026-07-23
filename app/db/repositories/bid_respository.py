@@ -37,10 +37,7 @@ class BidNoticeRepository:
             notice.parse_status = status
             await self.session.flush()
     async def get_chunked_notices(self) -> list[BidNotice]:
-        """
-        청크 분할은 완료되었으나(CHUNKED), 
-        아직 임베딩이 완료되지 않은 공고 목록을 조회합니다.
-        """
+
         stmt = select(BidNotice).where(BidNotice.parse_status == ParseStatus.CHUNKED)
         result = await self.session.exec(stmt)
         

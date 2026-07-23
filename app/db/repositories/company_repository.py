@@ -1,9 +1,3 @@
-"""회사 도메인 영속성 계층.
-
-DB 접근만 담당한다. 존재 여부 판단·중복 처리·임베딩 같은 비즈니스 판단과 commit 은
-서비스(app/services/company_service.py)의 몫이다.
-"""
-
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -16,7 +10,7 @@ class CompanyRepository:
 
     async def add(self, company: Company) -> Company:
         self.session.add(company)
-        await self.session.flush()  # id 채우기 (commit 은 서비스에서)
+        await self.session.flush()
         return company
 
     async def get(self, company_id: int) -> Company | None:
@@ -90,7 +84,7 @@ class PartnerRepository:
 
     async def add(self, partner: Partner) -> Partner:
         self.session.add(partner)
-        await self.session.flush()  # id 채우기 (commit 은 서비스에서)
+        await self.session.flush()  
         return partner
 
     async def get(self, partner_id: int) -> Partner | None:

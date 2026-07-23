@@ -1,9 +1,3 @@
-"""회사 도메인 비즈니스 로직.
-
-CRUD 단계에서는 임베딩하지 않는다. profile/project 의 embedding 컬럼은 계속 NULL 로 남고,
-나중에 추천 단계에서 채운다(NULL = 미임베딩).
-"""
-
 from app.common.exceptions import AppException
 from app.db.models.company import Company, CompanyProfile, CompanyProject, Partner
 from app.db.repositories.company_repository import (
@@ -37,9 +31,6 @@ class CompanyService:
         self.project_repo = project_repo
         self.partner_repo = partner_repo
 
-    # ------------------------------------------------------------------ #
-    # Company
-    # ------------------------------------------------------------------ #
 
     async def get_company(self, company_id: int) -> Company:
         company = await self.company_repo.get(company_id)
@@ -70,9 +61,6 @@ class CompanyService:
         await self.company_repo.delete(company)
         await self.session.commit()
 
-    # ------------------------------------------------------------------ #
-    # CompanyProfile (회사당 1개)
-    # ------------------------------------------------------------------ #
 
     async def create_profile(
         self, company_id: int, data: CompanyProfileCreate
@@ -115,8 +103,6 @@ class CompanyService:
 
         await self.profile_repo.add(profile)
         await self.session.commit()
-        # updated_at 은 onupdate=now() 라 UPDATE 후 값이 무효화된다.
-        # refresh 없이 읽으면 lazy load 가 걸려 async 컨텍스트 밖에서 IO 를 시도한다(MissingGreenlet).
         await self.session.refresh(profile)
         return profile
 
@@ -124,10 +110,6 @@ class CompanyService:
         profile = await self.get_profile(company_id)
         await self.profile_repo.delete(profile)
         await self.session.commit()
-
-    # ------------------------------------------------------------------ #
-    # CompanyProject (회사당 N개)
-    # ------------------------------------------------------------------ #
 
     async def create_project(
         self, company_id: int, data: CompanyProjectCreate
@@ -151,7 +133,6 @@ class CompanyService:
     async def get_project(self, company_id: int, project_id: int) -> CompanyProject:
         await self.get_company(company_id)
         project = await self.project_repo.get(project_id)
-        # 다른 회사의 프로젝트는 존재하지 않는 것으로 취급한다.
         if project is None or project.company_id != company_id:
             raise AppException("프로젝트를 찾을 수 없습니다.", status_code=404)
         return project
@@ -181,10 +162,6 @@ class CompanyService:
         await self.project_repo.delete(project)
         await self.session.commit()
 
-    # ------------------------------------------------------------------ #
-    # Partner (회사당 N개)
-    # ------------------------------------------------------------------ #
-
     async def create_partner(self, company_id: int, data: PartnerCreate) -> Partner:
         await self.get_company(company_id)
 
@@ -205,7 +182,6 @@ class CompanyService:
     async def get_partner(self, company_id: int, partner_id: int) -> Partner:
         await self.get_company(company_id)
         partner = await self.partner_repo.get(partner_id)
-        # 다른 회사의 협력사는 존재하지 않는 것으로 취급한다.
         if partner is None or partner.company_id != company_id:
             raise AppException("협력사를 찾을 수 없습니다.", status_code=404)
         return partner

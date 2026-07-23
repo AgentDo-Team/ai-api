@@ -1,25 +1,3 @@
-"""협업 제안 이메일 서브그래프.
-
-메인 추천 그래프가 뽑은 약점(weakness)을 협력사가 보완해줄 수 있을 때, 협업 제안 메일을
-보내기 위해 분기하는 서브그래프다.
-
-구조:
-  START → compose_draft → human_review ──(승인)──▶ send_email → END
-                                  └──────(취소)──▶ END
-
-동작: 메일 초안 작성(compose_draft) → HITL 검수(human_review, 승인/취소) → 발송(send_email).
-
-HITL 은 langgraph interrupt/Command 로 구현한다. 프론트 챗봇 UI 연동 계약:
-  1. graph.ainvoke(inputs, config={"configurable": {"thread_id": <채팅 세션 id>}}) 로 실행.
-  2. 반환값에 "__interrupt__" 가 있으면 초안(to/subject/body)을 프론트에 노출하고 승인/취소를 받는다.
-  3. graph.ainvoke(Command(resume={"approved": bool}), config=<같은 thread_id>) 로 재개한다.
-
-interrupt 로 중단·재개하려면 checkpointer 가 필수라 InMemorySaver 로 컴파일한다(단일 프로세스용).
-
-메인 랭그래프는 build_collaboration_email_graph() 로 이 서브그래프를 얻어
-run_search_agent 처럼 래퍼 노드로 편입할 수 있다.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -43,10 +21,6 @@ logger = logging.getLogger(__name__)
 
 
 def _resume_to_approved(decision: object) -> bool:
-    """HITL 재개 값(Command(resume=...))에서 승인 여부를 읽는다.
-
-    프론트는 {"approved": bool} 를 보내는 게 기본이지만, bool 단독도 허용한다.
-    """
     if isinstance(decision, dict):
         return bool(decision.get("approved", False))
     return bool(decision)
@@ -56,17 +30,6 @@ def build_collaboration_email_graph(
     llm: LLMProvider | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
 ):
-    """협업 제안 이메일 서브그래프를 컴파일해 반환한다.
-
-    llm 을 주입하지 않으면 기본 구현(OpenAIProvider)을 사용한다.
-
-    checkpointer:
-      - 단독 실행 시 InMemorySaver 등을 주입해야 interrupt/resume 이 동작한다.
-      - 메인 그래프의 노드로 임베드할 땐 None 으로 컴파일해 부모(메인) 그래프의
-        checkpointer 를 상속받는다. 그래야 interrupt 가 최상위 thread 로 전파돼
-        같은 thread_id 로 Command(resume=...) 재개가 가능하다.
-    """
-
     llm = llm or OpenAIProvider()
 
     async def compose_draft(state: CollaborationEmailState) -> dict:
@@ -101,10 +64,6 @@ def build_collaboration_email_graph(
         }
 
     async def human_review(state: CollaborationEmailState) -> dict:
-        """초안을 사람에게 노출하고 승인/취소를 받는다 (HITL).
-
-        interrupt payload 는 프론트가 '어떤 회사에 어떤 메일을 보낼지' 보여주는 데 쓰인다.
-        """
         decision = interrupt(
             {
                 "action": "review_collaboration_email",
@@ -131,11 +90,6 @@ def build_collaboration_email_graph(
         return "send_email" if state.get("approved") else END
 
     async def send_email_node(state: CollaborationEmailState) -> dict:
-        """Gmail API 로 초안을 발송한다.
-
-        gmail_client.send_email 은 blocking(googleapiclient) 이라 이벤트 루프를 막지 않도록
-        스레드로 오프로드한다.
-        """
         get_stream_writer()(
             {
                 "type": "node",
@@ -166,7 +120,4 @@ def build_collaboration_email_graph(
         {"send_email": "send_email", END: END},
     )
     builder.add_edge("send_email", END)
-
-    # interrupt 기반 HITL 은 checkpointer 가 있어야 중단 지점에서 재개할 수 있다.
-    # 임베드 시엔 None 으로 컴파일해 부모 그래프의 checkpointer 를 상속받는다.
     return builder.compile(checkpointer=checkpointer)

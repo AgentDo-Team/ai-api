@@ -1,29 +1,3 @@
-"""3차 필터 오케스트레이션.
-
-흐름:
-1. aggregate_score(2차 매칭도) 내림차순 상위 CANDIDATE_N 건으로 채점 후보를 좁힌다
-2. 후보 공고를 EvaluationService.evaluate 로 배점표 채점 (공고 간 병렬, 공고별 독립 세션).
-   채점 끝난 공고 수를 진행률(progress_current/total)로 기록해 프론트 폴링에 내려준다
-3. final_score(= soft_score) 내림차순 정렬 → 상위 TOP_N 선별
-4. 상위 공고만 (a) 공고 청크 전체 ↔ 회사 프로필/프로젝트 전체 적합성 LLM 분석
-   (공고 1건당 요청 1건을 상위 5건 묶어 배치 전송, recommend_reason/weaknesses 각 최대 5개)
-   (b) 공고 내용 100자 요약 을 수행하고 AnalysisResult(recommend_reason/weaknesses/summary)에 저장
-   → 이 단계 진입 시 검색세트 상태를 ongoing_report_generation 으로 바꿔 프론트에 구분해 보여준다
-5. 상위 공고 목록 + 처리 제외(skipped) 목록 반환
-
-적합성 분석의 근거 강도: 각 항목은 grounding='cited'(프로필/프로젝트 필드 인용) 또는
-'inferred'(정황 추론)로 구분된다. LLM 이 인용했다고 답해도 그 ID 가 프롬프트에 실제로 실린
-근거가 아니면 _guard_fit_analysis 가 inferred 로 내린다 — cited 라벨이 "정말 그 필드에
-적혀 있다"는 뜻을 유지해야 프론트/사용자가 근거를 신뢰할 수 있다.
-
-aggregate_score 의 용도: 1단계 후보 선별에만 쓰고, 최종점수(final_score) 산정에는 쓰지 않는다.
-2차 필터가 이미 반영한 매칭도라 점수로 다시 더하면 이중 계산이 되지만, 어느 공고를 채점할지
-고르는 사전 지표로는 유효하다. 응답에는 참고 정보로 그대로 포함한다.
-
-동시성: SQLAlchemy AsyncSession 은 동시 쿼리를 허용하지 않으므로,
-공고 간 병렬화는 공고마다 session_factory 로 새 세션을 열어 처리한다.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -93,8 +67,6 @@ _FIT_ANALYSIS_SYSTEM_PROMPT = (
 )
 
 _FIT_ANALYSIS_MAX_ITEMS = 5
-# 적합성 분석 프롬프트에 넣을 회사 프로젝트 상한. "공고가 요구하는데 회사에 없음"을 판정하려면
-# 매칭된 것만이 아니라 전체 목록이 보여야 해서 리포지토리 기본 limit(20)보다 넉넉히 잡는다.
 _FIT_ANALYSIS_MAX_PROJECTS = 100
 
 _SUMMARY_SYSTEM_PROMPT = (
@@ -107,11 +79,6 @@ _SUMMARY_MAX_CHARS = 100
 
 
 def _fmt(value: object) -> str:
-    """프롬프트에 넣을 값 표현.
-
-    (str, Enum) 혼합 enum 도 파이썬 3.11+ 에서는 f-string 이 'CreditRating.A_PLUS' 처럼
-    찍혀서 LLM 이 실제 등급('A+')을 못 읽는다. enum 은 값으로 풀어서 넣는다.
-    """
     if isinstance(value, enum.Enum):
         return str(value.value)
     return str(value)
@@ -130,11 +97,6 @@ def _default_evaluation_service_factory(session: AsyncSession, llm: LLMProvider)
 
 
 class _FitPrompt:
-    """4-a(프롬프트 구성) 결과를 4-b(배치 호출)로 넘기기 위한 내부 홀더.
-
-    profile_id/project_ids 는 프롬프트에 실제로 실린 근거 ID 다. LLM 이 인용했다고 답한
-    cited_id 가 여기 있는지 대조해서, 없는 ID 를 지어낸 인용을 걸러낸다.
-    """
 
     def __init__(
         self,
@@ -150,12 +112,11 @@ class _FitPrompt:
 
 
 class _ScoredNotice:
-    """1단계(채점) 결과를 2·3단계로 넘기기 위한 내부 홀더."""
 
     def __init__(self, item: NoticeResultIn, soft_score: int, note: str | None = None) -> None:
         self.item = item
         self.soft_score = soft_score
-        self.note = note  # 배점표 미발견 등으로 soft_score=0 처리된 사유
+        self.note = note  
 
     @property
     def final_score(self) -> int:
@@ -165,11 +126,8 @@ class _ScoredNotice:
 
 class ThirdFilterService:
     TOP_N = 5
-    # 배점표 채점 대상 후보 수. 채점은 공고당 LLM 호출이 수십 회로 가장 비싼 단계인데
-    # 최종 반환은 TOP_N(5) 건뿐이라, aggregate_score 상위 이만큼만 채점한다.
-    # TOP_N 보다 넉넉히 잡아 aggregate_score 와 soft_score 의 순위 차이를 흡수한다.
     CANDIDATE_N = 10
-    MAX_CONCURRENT_NOTICES = 3  # 공고 간 병렬 처리 상한 (LLM/DB 부하 제한)
+    MAX_CONCURRENT_NOTICES = 3  
 
     def __init__(
         self,
@@ -181,24 +139,9 @@ class ThirdFilterService:
         self.llm = llm
         self.evaluation_service_factory = evaluation_service_factory
         self._semaphore = asyncio.Semaphore(self.MAX_CONCURRENT_NOTICES)
-        # 채점이 끝난 공고 수(진행률 폴링용). 서비스는 요청마다 새로 만들어지고 asyncio 는
-        # 단일 스레드라, 이 카운터는 await 없이 증가시키는 한 경쟁 없이 안전하다.
         self._completed = 0
 
-    # ------------------------------------------------------------------ #
-    # 전체 오케스트레이션
-    # ------------------------------------------------------------------ #
-
     async def run(self, req: ThirdFilterRequest) -> ThirdFilterResponse:
-        """오케스트레이션 진입점.
-
-        공고 1건 단위 처리(_evaluate_notice/_summarize_and_save)는 이미 내부에서
-        개별 실패를 흡수하지만, _build_fit_prompt 의 gather 나 _batch_analyze_fit 의
-        배치 LLM 호출처럼 여러 공고를 한 번에 묶어 처리하는 단계는 예외 가드가 없다.
-        이 단계에서 예외가 나면 검색세트가 ONGOING_THIRD_FILTER/ONGOING_REPORT_GENERATION
-        에 멈춘 채로 남아 프론트가 영원히 폴링하게 되므로, 여기서 잡아 FAILED 로 남기고
-        재전파한다.
-        """
         try:
             return await self._run(req)
         except Exception:
@@ -212,13 +155,10 @@ class ThirdFilterService:
         skipped: list[SkippedNotice] = []
         self._completed = 0
 
-        # 1단계: aggregate_score 상위 CANDIDATE_N 건만 채점 후보로 좁힌다.
-        # 진행률의 분모가 후보 수라서, 상태를 진행중으로 바꾸기 전에 먼저 확정한다.
         candidates = sorted(req.results, key=lambda r: r.aggregate_score, reverse=True)[
             : self.CANDIDATE_N
         ]
 
-        # 3차 필터 시작 → 상태를 진행중으로, 진행률을 0/후보수 로 초기화(폴링용).
         await self._set_search_set_status(
             req.search_set_id, SearchSetStatus.ONGOING_THIRD_FILTER
         )
@@ -229,8 +169,6 @@ class ThirdFilterService:
             len(req.results),
             len(candidates),
         )
-
-        # 2단계: 후보 공고 배점표 채점 (공고별 독립 세션으로 병렬)
         outcomes = await asyncio.gather(
             *[
                 self._evaluate_notice(req, item, i, len(candidates))
@@ -244,13 +182,9 @@ class ThirdFilterService:
             else:
                 scored.append(outcome)
 
-        # 3단계: 최종점수(=soft_score) 내림차순 상위 TOP_N
         scored.sort(key=lambda s: s.final_score, reverse=True)
         top = scored[: self.TOP_N]
 
-        # 4단계: 상위 공고만 적합성 분석 + 요약 + AnalysisResult 저장
-        # 상위 TOP_N 이 확정된 시점부터는 "무엇을 채점 중인지"가 아니라 "리포트를 작성 중"이라
-        # 프론트에 다른 문구를 보여줄 수 있도록 상태를 분리한다.
         await self._set_search_set_status(
             req.search_set_id, SearchSetStatus.ONGOING_REPORT_GENERATION
         )
@@ -259,13 +193,10 @@ class ThirdFilterService:
             len(top),
             [s.item.bid_notice_id for s in top],
         )
-        # 4-a: 공고별 적합성 분석 프롬프트 구성(DB 읽기만, 공고마다 독립 세션이라 병렬 안전)
         fit_prompts = await asyncio.gather(
             *[self._build_fit_prompt(req, s.item) for s in top]
         )
-        # 4-b: 상위 TOP_N 건을 한 번의 배치 호출로 묶어 적합성 분석(공고 1건당 요청 1건)
         fit_analyses = await self._batch_analyze_fit(list(fit_prompts))
-        # 4-c: 공고별 요약 + AnalysisResult 저장
         verified = await asyncio.gather(
             *[
                 self._summarize_and_save(req, s, fit)
@@ -279,7 +210,6 @@ class ThirdFilterService:
             else:
                 results.append(item)
 
-        # 3차 필터 완료 → 검색세트 상태를 완료로 갱신(폴링 종료 신호).
         await self._set_search_set_status(req.search_set_id, SearchSetStatus.COMPLETED)
 
         return ThirdFilterResponse(results=results, skipped=skipped)
@@ -291,7 +221,6 @@ class ThirdFilterService:
             await SearchSetRepository(session).set_status(search_set_id, status)
 
     async def _set_progress(self, search_set_id: int, current: int, total: int) -> None:
-        """진행률을 기록한다. 표시용이라 실패해도 채점 파이프라인을 멈추지 않는다."""
         try:
             async with self.session_factory() as session:
                 await SearchSetRepository(session).set_progress(
@@ -306,15 +235,9 @@ class ThirdFilterService:
                 exc_info=True,
             )
 
-    # ------------------------------------------------------------------ #
-    # 2단계: 공고 1건 채점
-    # ------------------------------------------------------------------ #
-
     async def _evaluate_notice(
         self, req: ThirdFilterRequest, item: NoticeResultIn, index: int, total: int
     ) -> _ScoredNotice | SkippedNotice:
-        # 세마포어 안에서 로그를 찍어야 실제 분석이 시작되는 시점과 일치한다
-        # (동시 MAX_CONCURRENT_NOTICES 건만 진행하므로 나머지는 여기서 대기한다).
         async with self._semaphore:
             logger.info(
                 "[채점] 공고 분석 시작 (%d/%d) notice=%s aggregate=%.4f",
@@ -341,8 +264,6 @@ class ThirdFilterService:
                 )
                 return _ScoredNotice(item, soft_score=soft_score)
             except AppException as e:
-                # 배점표 미발견(404) 등은 부적격이 아니라 '배점표 가점 없음'으로 취급해
-                # soft_score=0(=final_score 최하위)으로 랭킹에는 남긴다(skipped 로 빠뜨리지 않음).
                 logger.info(
                     "[채점] 공고 채점 불가 (%d/%d) notice=%s soft_score=0 사유=%s",
                     index,
@@ -357,37 +278,18 @@ class ThirdFilterService:
                     bid_notice_id=item.bid_notice_id, reason="채점 중 오류가 발생했습니다."
                 )
             finally:
-                # 성공/채점불가/오류 어느 쪽이든 이 공고는 처리가 끝났다. 셋 다 세어야
-                # 진행률이 끝까지 차오른다(오류 난 공고에서 멈춰 보이지 않게).
                 self._completed += 1
                 await self._set_progress(req.search_set_id, self._completed, total)
-
-    # ------------------------------------------------------------------ #
-    # 4단계: 상위 TOP_N(5) 공고 적합성 분석 + 요약 + 저장
-    #   4-a _build_fit_prompt   공고별 프롬프트 구성 (DB 읽기, 공고마다 독립 세션으로 병렬)
-    #   4-b _batch_analyze_fit  상위 TOP_N 건을 한 번의 배치 호출로 (공고 1건당 요청 1건)
-    #   4-c _summarize_and_save 공고별 요약 + AnalysisResult 저장
-    #   4-a/4-c 는 공고 1건 단위, 4-b 만 전체를 묶는다.
-    # ------------------------------------------------------------------ #
 
     async def _build_fit_prompt(
         self, req: ThirdFilterRequest, item: NoticeResultIn
     ) -> _FitPrompt | None:
-        """공고 1건의 청크 전체 + 회사 프로필/프로젝트 전체를 한 프롬프트로 묶는다.
-
-        프로젝트는 이 공고에 매칭된 것만이 아니라 회사의 전체 목록을 넣는다. weaknesses 는
-        "공고가 요구하는데 회사에 없음"에서 나오는데, 매칭된 일부만 보여주면 실제로는 보유한
-        실적을 없다고 단정하게 된다.
-
-        청크를 하나도 읽지 못하면(내용 없음/삭제) None 을 돌려 이 공고는 LLM 요청에서 뺀다.
-        """
         async with self._semaphore:
             async with self.session_factory() as session:
                 chunk_repo = ChunkRepository(session)
                 profile_repo = CompanyProfileRepository(session)
                 project_repo = CompanyProjectRepository(session)
 
-                # 2차 필터가 각 청크에 붙여준 매칭 근거를 참고 정보로 표시한다.
                 matched_by_chunk = {
                     rc.chunk_id: f"{rc.matched_source}#{rc.matched_id}" for rc in item.ranked_chunks
                 }
@@ -430,8 +332,6 @@ class ThirdFilterService:
                     or "(등록된 프로젝트 없음)"
                 )
 
-                # 인용 검증용 ID 는 세션이 살아 있는 동안 뽑아둔다. 세션이 닫히면 ORM 인스턴스가
-                # detach 되어 속성 접근이 불안정해진다.
                 profile_id = profile.id if profile else None
                 project_ids = {p.id for p in projects if p.id is not None}
 
@@ -452,11 +352,6 @@ class ThirdFilterService:
     async def _batch_analyze_fit(
         self, prompts: list[_FitPrompt | None]
     ) -> list[NoticeFitAnalysis | None]:
-        """상위 공고들의 적합성 분석을 한 번의 배치 호출로 묶어 전송한다(공고 1건당 요청 1건).
-
-        청크가 없어 프롬프트를 못 만든 공고는 요청에서 빼고 결과 자리도 None 으로 둔다.
-        배점표 채점(llm_model)과 달리 공고 전체를 읽는 무거운 판단이라 fit_judgment_model 을 쓴다.
-        """
         askable = [(i, p) for i, p in enumerate(prompts) if p is not None]
         if not askable:
             return [None] * len(prompts)
@@ -480,13 +375,7 @@ class ThirdFilterService:
 
     @staticmethod
     def _guard_fit_analysis(analysis: NoticeFitAnalysis, fit_prompt: _FitPrompt) -> NoticeFitAnalysis:
-        """방어적 가드: grounding='cited' 인데 실제로 인용한 게 없거나, 입력에 없던
-        프로필/프로젝트 ID 를 가리키면 'inferred' 로 내린다.
-
-        이 가드가 있어야 cited 라벨이 "정말 그 필드에 적혀 있다"는 뜻을 유지한다. 항목 자체를
-        버리지는 않는다 — 관찰은 유효하고 근거 강도만 낮은 경우가 대부분이라, 지우는 대신
-        inferred 로 표시해 프론트가 구분해 보여주게 한다.
-        """
+        
 
         def cites_real_evidence(r: FitReason) -> bool:
             if r.cited_source == "profile":
@@ -617,7 +506,6 @@ class ThirdFilterService:
     ) -> None:
         analysis = await analysis_repo.get_by_search_set_and_notice(search_set_id, bid_notice_id)
         if analysis is None:
-            # 1단계에서 배점표 미발견 등으로 evaluate 가 저장하지 못한 공고
             analysis = AnalysisResult(
                 search_set_id=search_set_id,
                 bid_notice_id=bid_notice_id,

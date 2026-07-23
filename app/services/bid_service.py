@@ -21,7 +21,6 @@ class BidService:
         self.bid_repo = BidNoticeRepository(session)
 
     def collect_bids(self, days_back=7):
-        """API 데이터를 수집하고 정형 데이터를 추출합니다."""
         SERVICE_KEY = "18dbc10d66b4f8764dcc5ada60ebe8550b7232c4a4883480afd6c24d8c5aed78"
         BASE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServc"
         
@@ -94,8 +93,6 @@ class BidService:
                 best_rfp = rfp_candidates[0]
                 bid_deadline = parse_dt(item.get('bidClseDt'))
                 
-                # 마감일이 없거나, 이미 지났는지 체크 (현재 시각과 비교)
-                # None이거나, 현재 시간보다 과거라면 건너뜀
                 if not bid_deadline or bid_deadline < datetime.now():
                     continue
                 
@@ -126,7 +123,6 @@ class BidService:
             print(" kordoc이 설치되어 있지 않습니다.")
             return
 
-        # 💡 생성자에서 받은 self.session 사용!
         for r in results:
             print(f"\n[{r['notice_no']}] 처리 중: {r['title']}")
             
@@ -135,7 +131,6 @@ class BidService:
                 print(f"  [건너뜀] 이미 DB에 존재하는 공고입니다.")
                 continue
 
-            # 파일 다운로드
             safe_name = f"{r['notice_no']}_{re.sub(r'[\\\\/:*?\"<>|]', '_', r['fileName'])}"
             local_path = dl_dir / safe_name
             
@@ -151,7 +146,6 @@ class BidService:
             else:
                 download_success = True
 
-            # 마크다운 파싱
             md_text = None
             status = ParseStatus.ERROR
             
@@ -163,7 +157,6 @@ class BidService:
                     print(f"  [파싱 성공] 크기: {len(md_text)} bytes")
                 else:
                     print(f"  [파싱 실패] {parse_res.status}")
-            # 파싱된 텍스트가 없으면 저장을 건너뜀
             if not md_text:
                 print(f"  [경고] 파싱된 내용이 없어 저장하지 않습니다: {r['notice_no']}")
                 continue
@@ -195,7 +188,6 @@ class BidService:
 
         print(f"\n 파이프라인(수집 -> 파싱 -> DB 저장) 완료!")
 
-    # 비동기 실행을 위한 진입점 래핑
     async def run_bid_pipeline(self):
         pipeline_start_time = time.time()
         print("🚀 [백그라운드] 공고 수집 및 파싱 파이프라인 시작...")

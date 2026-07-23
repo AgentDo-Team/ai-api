@@ -1,8 +1,3 @@
-"""협력사(Partner) 요청·응답 DTO.
-
-회사가 보유한 협력사(회사당 N건). 공고 분석의 약점(weakness)을 이 협력사가 해결해줄 수
-있는지 LLM 이 판단할 때 근거로 사용된다.
-"""
 
 from datetime import datetime
 
@@ -40,7 +35,6 @@ class PartnerCreate(BaseModel):
 
 
 class PartnerUpdate(BaseModel):
-    """부분 수정. 보낸 필드만 반영된다."""
 
     name: str | None = Field(default=None, max_length=200, description="협력사명")
     email: str | None = Field(

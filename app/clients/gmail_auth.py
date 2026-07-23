@@ -1,15 +1,3 @@
-"""
-Gmail OAuth 최초 인증 스크립트.
-
-client_secret.json (Google Cloud Console에서 발급받은 OAuth 클라이언트 시크릿)으로 브라우저
-동의 화면을 띄워 인증한 뒤, gmail_token.json (access/refresh token)을 생성한다.
-서비스 실행 중 반복 호출되는 코드가 아니라 최초 설정 시 1회만 실행하면 되므로
-app/clients/gmail_client.py 와 분리해두었다.
-
-실행:
-    uv run python -m app.clients.gmail_auth
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -26,7 +14,6 @@ def generate_token(
     client_secret_file: str | Path | None = None,
     token_file: str | Path | None = None,
 ) -> Path:
-    """client_secret.json 으로 브라우저 OAuth 동의를 받고 gmail_token.json 을 생성한다."""
     client_secret_path = Path(client_secret_file or settings.gmail_client_secret_file)
     token_path = Path(token_file or settings.gmail_token_file)
 

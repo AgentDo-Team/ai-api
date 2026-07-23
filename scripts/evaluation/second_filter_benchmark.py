@@ -1,5 +1,3 @@
-"""Evaluate second-filter retrieval over multi-notice search scenarios."""
-
 from __future__ import annotations
 
 import argparse
@@ -47,7 +45,6 @@ class TargetSnapshot(BaseModel):
 
 
 class EvaluationCase(BaseModel):
-    """One company/query applied to the notices that passed the hard filter."""
 
     case_id: str
     company_id: int
@@ -166,7 +163,6 @@ async def retrieve_scenario(
     targets: list[_Target],
     candidate_k: int,
 ) -> dict[int, Ranking]:
-    """Run a retrieval method while preserving production multi-notice batching."""
     fetch = candidate_k * 2
     rrf_k = getattr(service, "rrf_k", RRF_K)
     rankings: dict[int, Ranking] = {}
@@ -218,11 +214,6 @@ def rank_notices(
     final_k: int,
     aggregate_method: AggregateMethod = "sum_top_k",
 ) -> tuple[list[int], dict[int, float]]:
-    """Rank notices without changing the chunk/output contract.
-
-    Alternative aggregation is benchmark-only until it wins on multiple
-    independently labelled company scenarios.
-    """
 
     def aggregate(ranking: Ranking) -> float:
         values = ranking.scores[:final_k]

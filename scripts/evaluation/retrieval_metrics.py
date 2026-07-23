@@ -1,5 +1,3 @@
-"""Pure metrics used by offline retrieval evaluation."""
-
 from __future__ import annotations
 
 import math
@@ -12,7 +10,6 @@ def recall_at_k(
     k: int,
     min_relevance: int = 1,
 ) -> float:
-    """min_relevance 이상인 정답 중 top-k에 포함된 비율."""
     relevant = {
         chunk_id for chunk_id, grade in relevance.items() if grade >= min_relevance
     }
@@ -28,7 +25,6 @@ def hit_rate_at_k(
     k: int,
     min_relevance: int = 1,
 ) -> float:
-    """top-k에 기준 이상의 정답이 하나라도 있으면 1, 없으면 0."""
     relevant = {
         chunk_id for chunk_id, grade in relevance.items() if grade >= min_relevance
     }
@@ -40,7 +36,6 @@ def hit_rate_at_k(
 def reciprocal_rank(
     ranked_ids: Sequence[int], relevance: dict[int, int], min_relevance: int = 1
 ) -> float:
-    """첫 관련 청크 순위의 역수. 검색하지 못하면 0."""
     relevant = {
         chunk_id for chunk_id, grade in relevance.items() if grade >= min_relevance
     }
@@ -55,7 +50,6 @@ def reciprocal_rank(
 def ndcg_at_k(
     ranked_ids: Sequence[int], relevance: dict[int, int], k: int
 ) -> float:
-    """등급형 관련도를 반영한 normalized DCG@K."""
 
     def dcg(grades: Sequence[int]) -> float:
         return sum(
@@ -70,7 +64,6 @@ def ndcg_at_k(
 
 
 def percentile(values: Sequence[float], percent: float) -> float:
-    """외부 통계 의존성 없이 선형 보간 percentile을 계산한다."""
     if not values:
         raise ValueError("percentile을 계산할 값이 필요합니다.")
     if not 0 <= percent <= 100:

@@ -1,11 +1,3 @@
-"""Finalize second-filter chunk labels after a second semantic review.
-
-The decision deliberately ignores dense/BM25/RRF ranks.  Notice relevance is
-used only as a ceiling: a chunk cannot be more relevant than the notice that
-contains it.  Content role, requirement category, and concrete capability
-evidence determine the final 0..3 grade.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -242,8 +234,6 @@ def _matches(text: str, patterns: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def _is_low_information(text: str) -> bool:
-    # Short but complete requirements (for example, one-sentence RAG scopes)
-    # can still be decisive; only fragments/headings are rejected by length.
     if len(text) < 25:
         return True
     if any(pattern in text for pattern in LIST_PATTERNS):
@@ -258,7 +248,6 @@ def _is_low_information(text: str) -> bool:
 
 
 def final_decision(row: dict[str, str]) -> FinalDecision:
-    """Return a content-grounded final grade without consulting retrieval rank."""
     text = normalize_content(row.get("content", ""))
     notice_grade = int(row.get("notice_relevance") or 0)
     topic = (row.get("l_topic") or "").strip()
@@ -275,13 +264,9 @@ def final_decision(row: dict[str, str]) -> FinalDecision:
     non_match_category = _matches(text, NON_MATCH_REQUIREMENT_PATTERNS)
     ai_operation = _matches(text, AI_OPERATION_PATTERNS)
 
-    # "연계 제외" describes a non-integrated exception and must not become a
-    # positive integration signal merely because of substring matching.
     if "연계 제외" in text:
         strong = tuple(pattern for pattern in strong if "연계" not in pattern)
 
-    # Architecture inventories and project-scope index rows are context, not
-    # evidence that the supplier must implement the mentioned capability.
     inventory = _matches(text, INVENTORY_PATTERNS)
     if inventory:
         grade = min(notice_grade, 1) if (direct or strong or generic) else 0
@@ -301,8 +286,6 @@ def final_decision(row: dict[str, str]) -> FinalDecision:
         grade = min(notice_grade, 2)
         return FinalDecision(grade, "시스템·DB 연동 구현은 성공 프로젝트의 통합 경험을 전이할 수 있음", integration_requirement)
 
-    # AI-specific operation/security/infrastructure work is relevant, but it is
-    # adjacent to rather than identical with the demonstrated RAG application.
     if direct and (non_match_category or procedural or ai_operation):
         if ai_operation:
             grade = min(notice_grade, 2)
@@ -325,14 +308,10 @@ def final_decision(row: dict[str, str]) -> FinalDecision:
         grade = min(notice_grade, 1)
         return FinalDecision(grade, "일반 사업명만 제시되어 구체 구현 적합성 근거는 제한적임", ())
 
-    # Generic project administration, security, testing and performance clauses
-    # do not become relevant merely because they mention a system or database.
     if procedural or non_match_category:
         return FinalDecision(0, "일반 보안·품질·성능·사업관리·계약 절차가 중심임", tuple(dict.fromkeys((*procedural, *non_match_category))))
 
     if strong:
-        # A specific screen/mobile/notification feature may contain the parent
-        # integrated-system name but remains ordinary SI work.
         feature = _matches(text, GENERIC_FEATURE_PATTERNS)
         grade = min(notice_grade, 1 if feature else 2)
         return FinalDecision(

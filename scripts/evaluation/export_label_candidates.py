@@ -1,5 +1,3 @@
-"""Export a pooled multi-notice CSV for human relevance judgments."""
-
 from __future__ import annotations
 
 import argparse
@@ -20,7 +18,6 @@ from app.services.second_filter_service import DOMAIN_TOPICS, SecondFilterServic
 def load_existing_labels(
     path: Path | None,
 ) -> tuple[dict[int, str], dict[tuple[int, int], tuple[str, str]]]:
-    """Load reusable notice/chunk labels from a previously completed CSV."""
     if path is None:
         return {}, {}
     notice_labels: dict[int, str] = {}

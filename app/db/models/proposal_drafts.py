@@ -26,7 +26,7 @@ class ProposalDraft(SQLModel, table=True):
             ForeignKey("bid_notices.id", ondelete="CASCADE"),
             nullable=False,
         )
-    )  # 분석 대상 공고 (1:n)
+    ) 
     
     search_set_id: int = Field(
         sa_column=Column(
@@ -34,7 +34,7 @@ class ProposalDraft(SQLModel, table=True):
             # ForeignKey("companies.id", ondelete="CASCADE"), 
             nullable=False,
         )
-    )  # 매칭된 결과 정보 (1:n)
+    )  
     
     company_id: int = Field(
         sa_column=Column(
@@ -42,17 +42,15 @@ class ProposalDraft(SQLModel, table=True):
             ForeignKey("companies.id", ondelete="CASCADE"),
             nullable=False,
         )
-    )  #회사 정보
+    )  
 
     draft_data: dict = Field(
         sa_column=Column(JSONB, nullable=False)
-    )  # Pydantic 모델(ProposalDraftData)의 model_dump() 결과가 저장될 JSONB 컬럼
-    
+    )  
     file_name: Optional[str] = Field(
         default=None,
         sa_column=Column(String(500))
     ) 
-
     
     created_at: Optional[datetime] = Field(
         default=None,

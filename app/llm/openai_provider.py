@@ -1,5 +1,3 @@
-"""OpenAI 기반 LLMProvider 구현체."""
-
 from __future__ import annotations
 
 from typing import TypeVar
@@ -17,9 +15,6 @@ T = TypeVar("T", bound=BaseModel)
 class OpenAIProvider(LLMProvider):
     def __init__(self, client: AsyncOpenAI | None = None, chat: ChatOpenAI | None = None) -> None:
         self.client = client or AsyncOpenAI(api_key=settings.openai_api_key)
-        # 배치 호출(complete_structured_batch) 전용. 랭체인 Runnable.abatch 로 다건 요청을 한 번에 보낸다.
-        # 모델마다 ChatOpenAI 인스턴스가 따로 필요해 model 이름으로 캐싱한다. 생성자로 주입받은
-        # chat 이 있으면 테스트용 대역으로 보고 모델과 무관하게 그것만 쓴다.
         self._injected_chat = chat
         self._chats: dict[str, ChatOpenAI] = {}
 

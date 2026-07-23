@@ -1,4 +1,3 @@
-# app/db/models/__init__.py
 from app.db.models.proposal_drafts import ProposalDraft
 from app.db.models import BidNotice, Chunk, Company, SearchSet, AnalysisResult, HardFilter
 

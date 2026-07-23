@@ -1,5 +1,3 @@
-"""Capture PostgreSQL/pg_search BM25 EXPLAIN ANALYZE evidence."""
-
 from __future__ import annotations
 
 import argparse

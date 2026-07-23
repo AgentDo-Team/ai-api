@@ -1,9 +1,3 @@
-"""챗봇 채팅 세션 CRUD + 대화 엔드포인트.
-
-세션(채팅방)은 기존 SearchSet 을 재사용하고, 메시지는 chat_messages 테이블에 쌓인다.
-JWT 인증 필수. 경로의 company_id 가 토큰의 계정(=회사) id 와 다르면 403.
-"""
-
 import json
 from typing import Annotated
 
@@ -147,7 +141,6 @@ async def send_message_stream(
 
 
 def _agent_stream_response(events) -> StreamingResponse:
-    """약점 해결 에이전트 이벤트(AsyncIterator[dict])를 SSE 스트림으로 감싼다."""
 
     async def event_source():
         try:

@@ -53,15 +53,10 @@ def slice_rfp_by_headers(raw_text: str, doc_structure: DocumentStructure):
             if content_started: current_content.append(original_line)
             continue
 
-        # 두 가지 버전의 문자열 생성
         line_no_spaces = clean_line.replace(" ", "")
         
-        # 매칭 정확도를 위해 본문 줄에서 모든 형태의 괄호와 괄호 안의 내용을 완전히 제거
         line_void_parentheses = re.sub(r'\(.*?\)|\[.*?\]|託.*?〕|〈.*?〉', '', clean_line).replace(" ", "")
         
-        # [방어 로직 강화] 점선뿐만 아니라 공백이나 탭 뒤에 번호가 오는 목차 라인 완벽 차단
-        # r'\.{2,}|·{2,}' -> 점선 필터링
-        # r'\s+\d+\s*$|\t+\d+\s*$' -> 스페이스나 탭 뒤에 숫자로 끝나는 라인 (예: "과업 개요 1")
         is_toc_line = bool(re.search(r'\.{2,}|·{2,}|\s+\d+\s*$|\t+\d+\s*$', clean_line))
         
         matched_header = None
@@ -69,10 +64,7 @@ def slice_rfp_by_headers(raw_text: str, doc_structure: DocumentStructure):
             for header_dict in header_list:
                 clean_target = header_dict["clean_text"]
                 
-                # 괄호가 청소된 본문 줄을 기준으로 매칭 및 길이 평가 수행
                 if clean_target in line_void_parentheses:
-                    # 괄호를 다 떼어냈으므로, 남은 텍스트 길이는 핵심어 길이와 차이가 거의 없어야 함 (앞의 숫자 3. 정도만 남음)
-                    # 방어 조건을 +6 정도로 빡빡하게 줄여서 오탐지를 완벽 차단
                     if len(line_void_parentheses) <= len(clean_target) + 6:
                         matched_header = header_dict
                         break
@@ -90,16 +82,12 @@ def slice_rfp_by_headers(raw_text: str, doc_structure: DocumentStructure):
             current_l_topic = header_info.l_topic
             current_s_topic = header_info.s_topic
             
-            # 중복 매칭을 막기 위해 리스트에서 소거
-            # header_list.remove(matched_header)
-            
         if content_started:
             current_content.append(original_line)
 
     save_chunk() 
     return chunks
 
-# 단락 기호 별 분리
 def refine_chunks_by_bullets_and_tables(chunks: list, bullet_hierarchy: list) -> list:
     STANDARD_BULLET_PATTERNS = [
         (r"[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+\.", "로마자"),
@@ -120,11 +108,9 @@ def refine_chunks_by_bullets_and_tables(chunks: list, bullet_hierarchy: list) ->
         l_topic, s_topic, content = chunk['l_topic'], chunk['s_topic'], chunk['content']
         lines = content.split('\n')
 
-        # 최상위 기호 결정
         top_bullet_name, split_bullet_pattern = 'None', None
         for pat, name in STANDARD_BULLET_PATTERNS:
             regex = re.compile(rf"^\s*{pat}")
-            # 헤더(#) 라인이 아닌 줄에서만 기호 탐색
             if any(regex.search(line) for line in lines if not line.strip().startswith('#')):
                 split_bullet_pattern = regex
                 top_bullet_name = name
@@ -145,7 +131,6 @@ def refine_chunks_by_bullets_and_tables(chunks: list, bullet_hierarchy: list) ->
         for line in lines:
             clean_line = line.strip()
 
-            # 1. 테이블 시작/종료 처리 (depth 추적)
             if "<table>" in clean_line:
                 if table_depth == 0:
                     save_sub_chunk(current_sub_content)
@@ -160,15 +145,11 @@ def refine_chunks_by_bullets_and_tables(chunks: list, bullet_hierarchy: list) ->
                     save_sub_chunk(current_sub_content)
                 continue
 
-            # 2. 테이블 내부일 경우 기호/헤더 검사 무시하고 누적
             if table_depth > 0:
                 current_sub_content.append(line)
                 continue
 
-            # 3. 테이블 외부일 때만 헤더 및 기호 기반 분할 수행
-            # 💡 [핵심] 헤더(###)는 자르지 않고 누적, 단락 기호는 자름
             if clean_line.startswith('#'):
-                # 헤더를 만났을 때 이전 내용이 있다면 저장하고 새로 시작
                 save_sub_chunk(current_sub_content)
                 current_sub_content.append(line)
             elif split_bullet_pattern and split_bullet_pattern.search(clean_line):

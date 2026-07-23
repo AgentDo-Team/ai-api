@@ -1,9 +1,3 @@
-"""공고 검색 API 라우터.
-
-JWT 인증 필수. 검색 주체 회사는 요청 본문이 아니라 토큰의 계정(=회사)에서 가져온다
-(본인 프로필/프로젝트 기준으로만 검색하도록 강제).
-"""
-
 import asyncio
 import json
 import time
@@ -36,10 +30,8 @@ from app.services import search_service
 
 router = APIRouter(prefix="/bid-notices", tags=["bid-notices"])
 
-# 서버가 이 주기로 DB 상태를 다시 읽어 변경분만 push한다.
 STATUS_POLL_INTERVAL_SECONDS = 2.0
 
-# 스트림이 영원히 열려 있지 않도록 하는 최대 유지 시간.
 STATUS_STREAM_MAX_SECONDS = 600.0
 
 
@@ -49,11 +41,6 @@ async def search_bid_notices(
     current_account: CurrentAccountDep,
     session: AsyncSession = Depends(get_session),
 ) -> ApiResponse[BidSearchResponse]:
-    """채팅창 공고 검색.
-
-    1차 하드 필터링과 2차 소프트필터를 로그인한 회사 기준으로 수행한다.
-    company_id는 요청 본문이 아니라 JWT 토큰의 로그인 계정에서 가져온다.
-    """
     result = await search_service.search_bid_notices(
         session,
         current_account.id,
@@ -63,22 +50,15 @@ async def search_bid_notices(
 
 
 def _sse(event: dict) -> str:
-    """dict 이벤트를 SSE data 블록으로 직렬화한다."""
     return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
 
 async def _read_status(search_set_id: int) -> SearchSet | None:
-    """매 폴링마다 새 세션으로 최신 검색세트 상태를 읽는다.
-
-    스트림에서 하나의 세션을 계속 사용하면 다른 요청에서 커밋한 상태 변경이
-    보이지 않을 수 있으므로, 매번 새로운 세션을 사용한다.
-    """
     async with async_session_factory() as session:
         return await session.get(SearchSet, search_set_id)
 
 
 async def _status_event_source(search_set_id: int) -> AsyncIterator[str]:
-    """검색세트 상태나 진행률이 변경될 때 SSE 이벤트를 전송한다."""
     last_key = None
     deadline = time.monotonic() + STATUS_STREAM_MAX_SECONDS
 
@@ -137,7 +117,6 @@ async def get_search_set_status(
         Depends(get_search_set_repository),
     ],
 ) -> ApiResponse[SearchSetStatusResponse]:
-    """검색세트 분석 진행 상태를 일반 JSON 응답으로 조회한다."""
     search_set = await search_set_repo.get(search_set_id)
 
     if search_set is None:
@@ -170,11 +149,6 @@ async def stream_search_set_status(
         Depends(get_search_set_repository),
     ],
 ) -> StreamingResponse:
-    """검색세트 분석 진행 상태를 SSE로 전송한다.
-
-    소유권 검증은 스트림을 열기 전에 수행한다. 상태 또는 진행률이 변경될 때마다
-    이벤트를 전송하고 completed 상태에 도달하면 스트림을 종료한다.
-    """
     search_set = await search_set_repo.get(search_set_id)
 
     if search_set is None:
@@ -212,7 +186,6 @@ async def get_analysis_results(
         Depends(get_analysis_repository),
     ],
 ) -> ApiResponse[AnalysisResultsResponse]:
-    """검색세트의 분석 결과를 최종점수 내림차순으로 조회한다."""
     search_set = await search_set_repo.get(search_set_id)
 
     if search_set is None:

@@ -1,5 +1,3 @@
-"""회원가입 / 로그인 API 라우터 (계정 = 회사)."""
-
 import jwt
 from fastapi import APIRouter, Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -19,9 +17,6 @@ from app.schemas.response import ApiResponse
 from app.services import auth_service, profile_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-# Authorization: Bearer <token> 헤더에서 토큰을 꺼낸다.
-# auto_error=False: 토큰이 없을 때 기본 403 대신, 아래에서 통일된 401로 처리.
 security = HTTPBearer(auto_error=False)
 
 
@@ -31,7 +26,6 @@ async def signup(
     session: AsyncSession = Depends(get_session),
 ) -> ApiResponse[AccountResponse]:
     company = await auth_service.signup(session, data)
-    # 방금 가입한 계정은 아직 프로필이 없으므로 has_profile=False
     return ApiResponse.ok(
         data=AccountResponse.model_validate(company, from_attributes=True),
         message="회원가입이 완료되었습니다.",
@@ -78,12 +72,6 @@ async def get_current_account(
 async def logout(
     current_account: Company = Depends(get_current_account),
 ) -> ApiResponse[None]:
-    """로그아웃.
-
-    서버는 stateless JWT만 사용하므로 토큰 자체를 무효화하지 않는다.
-    유효한 토큰 소유자인지만 확인하고, 실제 토큰 폐기는 클라이언트가
-    로컬에 저장된 토큰을 삭제하는 방식으로 처리한다.
-    """
     return ApiResponse.ok(message="로그아웃되었습니다.")
 
 
@@ -92,10 +80,6 @@ async def me(
     current_account: Company = Depends(get_current_account),
     session: AsyncSession = Depends(get_session),
 ) -> ApiResponse[AccountResponse]:
-    """현재 로그인한 계정 정보 + 프로필 작성 여부(has_profile).
-
-    프론트는 has_profile 로 온보딩(입력폼) 화면과 채팅 화면을 분기한다.
-    """
     account = AccountResponse.model_validate(current_account, from_attributes=True)
     account.has_profile = await profile_service.has_profile(
         session, current_account.id

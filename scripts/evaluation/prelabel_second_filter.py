@@ -1,10 +1,3 @@
-"""Create transparent, review-first draft labels for second-filter chunks.
-
-The draft grade intentionally does not use dense/BM25/RRF ranks. Retrieval ranks
-only decide which rows a human should review first, preventing circular labels
-that merely reward the current retrieval implementation.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -18,9 +11,6 @@ from pathlib import Path
 
 TAG_RE = re.compile(r"<[^>]+>")
 SPACE_RE = re.compile(r"\s+")
-
-# Grade 3 evidence: capabilities that directly describe the company's NLP/RAG
-# offering or the concrete successful-project functionality.
 DIRECT_TERMS = (
     "자연어처리",
     "자연어 처리",
@@ -39,7 +29,6 @@ DIRECT_TERMS = (
     "도메인 특화 에이전트",
 )
 
-# Grade 2 evidence: concrete capabilities demonstrated by the profile/project.
 PROJECT_TERMS = (
     "통합정보시스템",
     "통합 정보시스템",
@@ -57,8 +46,6 @@ PROJECT_TERMS = (
     "임베딩",
 )
 
-# Grade 1 evidence: generic SI capability. These terms alone are insufficient
-# to claim that the notice directly matches the company's successful project.
 GENERIC_TERMS = (
     "정보시스템",
     "시스템 구축",
@@ -93,7 +80,6 @@ def _matches(text: str, terms: tuple[str, ...]) -> list[str]:
 
 
 def draft_label(content: str) -> DraftLabel:
-    """Assign a conservative 0..3 draft grade from content evidence only."""
     text = normalize_content(content)
     direct = _matches(text, DIRECT_TERMS)
     project = _matches(text, PROJECT_TERMS)
@@ -134,7 +120,6 @@ def _rank(value: str | None) -> int | None:
 
 
 def review_priority(row: dict[str, str], label: DraftLabel) -> tuple[str, str]:
-    """Prioritize likely positives, uncertain drafts, and top retrieval rows."""
     ranks = [
         rank
         for rank in (

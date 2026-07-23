@@ -18,7 +18,6 @@ class IngestionService:
         self.session = session
         self.bid_repo = BidNoticeRepository(session)
         self.chunk_repo = ChunkRepository(session)
-        # OpenAI 임베딩 모델(text-embedding-3 시리즈 및 ada-002)에서 사용하는 기본 인코딩
         self.tokenizer = tiktoken.get_encoding("cl100k_base")
 
     async def run_chunking_pipeline(self):
@@ -36,45 +35,37 @@ class IngestionService:
             print(f"\n[파싱 시작] 공고번호: {notice.notice_no}")
             
             try:
-                # 1. 마크다운 처리
                 processed_md = convert_md_tables_to_html(notice.raw_md_text)
                 structure = analyze_toc_with_gpt(processed_md)
                 bullets = extract_bullet_hierarchy(processed_md)
                 
-                # 2. 정밀 청킹
                 primary = slice_rfp_by_headers(processed_md, structure)
                 merged = merge_tiny_chunks(primary, min_len=50)
                 final_chunks = refine_chunks_by_bullets_and_tables(merged, bullets)
                 
-                # 3. 청크 존재 여부 체크
                 if not final_chunks:
                     print(f"[파싱 실패] 생성된 청크가 없습니다. 상태를 ERROR로 변경합니다.")
                     await self.bid_repo.update_status(notice.id, ParseStatus.ERROR)
                     await self.session.commit()
                     continue
                 
-                # Tiktoken 기반 거대 청크 안전 분할
-                MAX_TOKENS = 7500   # OpenAI 제한(8192)을 고려해 안전하게 7500 토큰으로 설정
-                OVERLAP_TOKENS = 400 # 문맥 유지를 위해 약 400 토큰(한글 150~200자) 겹치게 설정
+                MAX_TOKENS = 7500  
+                OVERLAP_TOKENS = 400 
 
                 safe_chunks = []
                 for c in final_chunks:
                     content = c['content']
                     
-                    # 텍스트를 토큰 배열로 변환
                     tokens = self.tokenizer.encode(content)
                     
                     if len(tokens) <= MAX_TOKENS:
-                        # 토큰 수가 안전 범위 내면 그대로 추가 (토큰 수도 함께 저장하면 좋습니다)
                         c['token_count'] = len(tokens)
                         safe_chunks.append(c)
                     else:
-                        # 제한을 초과하는 거대 청크는 토큰 단위로 슬라이싱
                         start = 0
                         part_num = 1
                         while start < len(tokens):
                             end = start + MAX_TOKENS
-                            # 토큰을 잘라서 다시 문자열(텍스트)로 복원 (decode)
                             part_tokens = tokens[start:end]
                             part_content = self.tokenizer.decode(part_tokens)
                             
@@ -85,11 +76,9 @@ class IngestionService:
                                 "token_count": len(part_tokens)
                             })
                             
-                            # 오버랩만큼 뒤로 가서 다음 청크 시작
                             start += (MAX_TOKENS - OVERLAP_TOKENS)
                             part_num += 1
 
-                # 4. 청크 리스트 저장
                 chunk_objs = []
                 for idx, c in enumerate(safe_chunks):
                     chunk_objs.append(Chunk(
@@ -97,14 +86,13 @@ class IngestionService:
                         chunk_index=idx,
                         content=c['content'],
                         chunk_metadata={"l_topic": c['l_topic'], "s_topic": c['s_topic']},
-                        token_count=c.get('token_count', 0), # 텍스트 길이가 아닌 실제 토큰 수 저장
+                        token_count=c.get('token_count', 0), 
                         lexical_weights=None,          
                         page_no=None                
                     ))
                 
                 await self.chunk_repo.add_all(chunk_objs)
                 
-                # 5. 최종 완료 처리
                 await self.bid_repo.update_status(notice.id, ParseStatus.CHUNKED)
                 await self.session.commit()
                 print(f"[성공] '{notice.title}' 처리 완료 (최종 청크 {len(chunk_objs)}개 생성)")

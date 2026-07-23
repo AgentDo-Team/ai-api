@@ -1,17 +1,3 @@
-"""협업 제안 이메일 서브그래프 단독 실행 러너 (테스트용).
-
-compose_draft → human_review(interrupt) → (승인 시) send_email 흐름을 단독으로 검증한다.
-compose_draft 가 DB(company/partner/bid_notice)를 조회하므로, 아래 SAMPLE_* id 에 해당하는
-행이 DB 에 있어야 한다.
-
-실행:
-    uv run python -m app.agents.collaboration_email
-
-기본은 HITL 에서 '취소'로 재개해 실제 발송/Gmail 자격증명 없이도 흐름을 검증한다.
-전체(발송) 검증은 APPROVE = True 로 바꾸고, 먼저 app.clients.gmail_auth 로 토큰을 발급한
-뒤 협력사에 유효한 email 이 등록돼 있어야 한다.
-"""
-
 from __future__ import annotations
 
 import asyncio

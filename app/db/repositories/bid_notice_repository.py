@@ -1,5 +1,3 @@
-"""입찰공고(bid_notice) 영속성 계층."""
-
 from __future__ import annotations
 
 from sqlmodel.ext.asyncio.session import AsyncSession

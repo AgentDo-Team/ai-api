@@ -1,21 +1,3 @@
-"""회사 약점 해결 에이전트 — 메인 그래프.
-
-입력(약점 분석이 끝난 공고)을 받아, 보유 협력사로 약점을 해소할 수 있는지 LLM 이 판단하고
-분기한다.
-
-구조:
-  START → judge_partner ──(협력사로 해소 가능)──▶ email  (협업 제안 메일, HITL) ──▶ END
-                          └─(해소 불가/협력사 없음)──▶ search(상위 3개 약점 병렬 웹검색) ──▶ END
-
-이메일/검색 서브그래프는 "컴파일된 그래프 노드"로 직접 임베드한다. 그래야
-  - 이메일의 interrupt() 가 최상위 thread 로 전파돼 HITL 승인/취소 재개가 되고,
-  - 검색 서브그래프의 get_stream_writer() 커스텀 이벤트가 최상위 스트림까지 전파된다.
-이를 위해 CollaborationAgentState 는 두 서브그래프의 키를 모두 포함하는 superset 이다.
-
-노드 진행 상태는 get_stream_writer() 로 발행하며, 서비스가
-graph.astream(stream_mode=["custom","updates"], subgraphs=True) 로 받아 SSE 로 흘린다.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -73,17 +55,11 @@ def build_collaboration_agent_graph(
     tavily: AsyncTavilyClient | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
 ):
-    """회사 약점 해결 에이전트 메인 그래프를 컴파일해 반환한다.
-
-    llm / tavily 미주입 시 기본 구현을 사용한다. checkpointer 미주입 시 InMemorySaver 를 쓴다
-    (이메일 HITL interrupt/resume 에 필수).
-    """
 
     llm = llm or OpenAIProvider()
     tavily = tavily or AsyncTavilyClient(api_key=settings.tavily_api_key)
 
     async def judge_partner(state: CollaborationAgentState) -> dict:
-        """약점을 로드하고, 협력사 조회 tool 로 협력사를 확인해 해소 가능 여부를 판단한다."""
         writer = get_stream_writer()
         writer(
             {

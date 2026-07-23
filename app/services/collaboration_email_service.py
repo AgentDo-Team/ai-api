@@ -1,13 +1,3 @@
-"""협업 제안 메일 초안 작성 서비스.
-
-우리 회사/협력사/보완이 필요한 입찰공고 정보를 조회하고, 부족한 부분에 대한 설명을 LLM으로
-생성해 메일 양식(수신자/제목/본문)에 채워 넣는다.
-
-LangGraph 파이프라인에서는 메일 작성(compose) → HITL 검수(승인/취소) → 발송
-(app.clients.gmail_client.send_email) 순서로 쓰이므로, 이 서비스는 DB 저장이나 발송 없이
-초안만 반환한다. 수신자 주소는 협력사(Partner.email)에서 가져온다.
-"""
-
 from __future__ import annotations
 
 from app.common.exceptions import AppException

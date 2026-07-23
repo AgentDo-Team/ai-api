@@ -6,7 +6,6 @@ T = TypeVar("T")
 
 
 class ApiResponse(BaseModel, Generic[T]):
-    """모든 API 응답에서 공통으로 사용하는 응답 포맷."""
 
     success: bool
     message: str

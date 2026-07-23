@@ -1,20 +1,9 @@
-"""챗봇 채팅 세션 / 메시지 요청·응답 DTO.
-
-세션은 기존 SearchSet(=검색 세션/채팅방)을 재사용하고, 메시지는 기존 ChatMessage
-테이블에 role(user/assistant)/content 로 쌓는다. 별도 챗봇 테이블은 만들지 않는다.
-"""
-
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.models.analysis import ChatMessage
 from app.db.models.search import SearchSet
-
-# --------------------------------------------------------------------------- #
-# ChatSession (= SearchSet)
-# --------------------------------------------------------------------------- #
-
 
 class ChatSessionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -27,12 +16,6 @@ class ChatSessionRead(BaseModel):
     @classmethod
     def of(cls, session: SearchSet) -> "ChatSessionRead":
         return cls.model_validate(session)
-
-
-# --------------------------------------------------------------------------- #
-# ChatMessage
-# --------------------------------------------------------------------------- #
-
 
 class ChatRequest(BaseModel):
     question: str = Field(

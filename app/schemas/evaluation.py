@@ -1,9 +1,3 @@
-"""평가기준표 기반 채점 파이프라인 DTO.
-
-EvalCriterion/CriteriaExtractionResult/CriterionJudgment 는 LLM structured output
-타겟으로도 그대로 쓰인다(OpenAIProvider.complete_structured(response_model=...)).
-"""
-
 from __future__ import annotations
 
 from typing import Literal
@@ -18,17 +12,11 @@ class EvalCriterion(BaseModel):
 
 
 class CriteriaExtractionResult(BaseModel):
-    """2단계: 평가기준표 청크를 세부평가 항목 리스트로 분리한 LLM 출력."""
 
     criteria: list[EvalCriterion]
 
 
 class CriterionJudgment(BaseModel):
-    """4단계: 세부평가 항목 1개에 대한 단일 LLM 채점 결과.
-
-    verdict="no_evidence" 인 경우 서비스 레이어가 score 를 0 으로 강제 덮어쓴다
-    (LLM 이 근거 없이 점수를 지어내는 것을 방지).
-    """
 
     verdict: Literal["found", "no_evidence"]
     chunk_id: int | None = Field(default=None, description="근거로 인용한 bid_notice 청크 ID")
@@ -41,7 +29,6 @@ class CriterionJudgment(BaseModel):
 
 
 class CriterionScoreResult(BaseModel):
-    """6단계: 세부평가 항목 1개에 대한 K회 반복 채점 집계 결과."""
 
     criterion: EvalCriterion
     earned_score: float = Field(description="K회 점수 평균")

@@ -1,5 +1,3 @@
-"""회사 협력사(partners) CRUD 엔드포인트. 회사당 N건(1:N)."""
-
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path, Query, status
@@ -9,7 +7,6 @@ from app.schemas.partner import PartnerCreate, PartnerRead, PartnerUpdate
 from app.schemas.response import ApiResponse
 from app.services.company_service import CompanyService
 
-# JWT 인증 필수. 경로의 company_id가 토큰의 계정(=회사) id와 다르면 403.
 router = APIRouter(
     prefix="/api/companies/{company_id}/partners",
     tags=["partners"],

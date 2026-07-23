@@ -6,11 +6,6 @@ from app.db.repositories.search_set_repository import SearchSetRepository
 
 @tool
 async def get_company_profile(search_set_id: int) -> dict:
-    """
-    search_set_id를 이용하여 회사의 기본 정보(프로필)를 조회합니다.
-    
-    반환: company_scale, target_techs, offered_solutions, strengths_diff 등
-    """
     async with async_session_factory() as session:
         search_set_repo = SearchSetRepository(session)
         company_repo = CompanyRepository(session)
@@ -32,9 +27,7 @@ async def get_company_profile(search_set_id: int) -> dict:
 
 @tool
 async def get_company_projects(search_set_id: int) -> list:
-    """
-    search_set_id를 이용하여 회사 수행 프로젝트(최근 성공 실적)를 조회합니다.
-    """
+    
     async with async_session_factory() as session:
         search_set_repo = SearchSetRepository(session)
         project_repo = CompanyProjectRepository(session)
@@ -57,9 +50,7 @@ async def get_company_projects(search_set_id: int) -> list:
 
 @tool
 async def get_bid_notice(bid_notice_id: int) -> dict:
-    """
-    bid_notice_id를 이용하여 대상 입찰 공고의 상세 정보를 조회합니다.
-    """
+    
     async with async_session_factory() as session:
         bid_repo = BidNoticeRepository(session)
         bid = await bid_repo.get(bid_notice_id)

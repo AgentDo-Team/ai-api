@@ -26,9 +26,7 @@ class ProposalDraftRepository:
         search_set_id: int = None, 
         bid_notice_id: int = None
     ) -> List[ProposalDraft]:
-        """
-        조건에 맞는 제안서 초안 목록을 최신순으로 조회합니다.
-        """
+        
         query = select(ProposalDraft)
 
         if company_id:
@@ -38,7 +36,6 @@ class ProposalDraftRepository:
         if bid_notice_id:
             query = query.where(ProposalDraft.bid_notice_id == bid_notice_id)
             
-        # 최신 생성된 제안서가 먼저 오도록 정렬
         query = query.order_by(desc(ProposalDraft.created_at))
         
         result = await self.session.exec(query)

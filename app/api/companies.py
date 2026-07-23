@@ -1,10 +1,3 @@
-"""회사(companies) 엔드포인트 — 본인 회사 조회/수정/삭제.
-
-계정 = 회사 구조이므로 회사 생성은 /auth/signup 이 담당한다.
-모든 라우트는 JWT 토큰의 계정(=회사) id와 경로의 company_id가
-일치해야 한다 (불일치 시 403).
-"""
-
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path

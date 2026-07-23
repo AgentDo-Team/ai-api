@@ -1,5 +1,3 @@
-"""Convert completed pooled-label CSVs to evaluation JSONL."""
-
 from __future__ import annotations
 
 import argparse
@@ -25,7 +23,6 @@ def _context_candidates(path: Path) -> list[Path]:
 
 
 def _dedupe_target_snapshot(targets: list[dict]) -> list[dict]:
-    """Mirror production's exact project-text deduplication in label snapshots."""
     seen_project_texts: set[str] = set()
     unique: list[dict] = []
     for target in targets:

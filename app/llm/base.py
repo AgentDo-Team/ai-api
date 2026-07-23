@@ -1,9 +1,3 @@
-"""LLM provider 공통 인터페이스.
-
-구조화 출력(response_model)과 임베딩만 제공한다. 프리텍스트 completion 은
-현재 파이프라인(평가기준 추출/채점)에서 쓰지 않아 인터페이스에 넣지 않았다.
-"""
-
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

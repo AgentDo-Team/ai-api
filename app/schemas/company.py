@@ -1,9 +1,3 @@
-"""회사 / 회사 프로필 / 회사 프로젝트 요청·응답 DTO.
-
-Read 응답에는 embedding(1024 float) 을 싣지 않고, 임베딩이 채워졌는지만 `embedded` 로 알려준다.
-CRUD 는 임베딩하지 않으므로 지금은 항상 false 이고, 나중에 추천 단계에서 채워진다.
-"""
-
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -11,13 +5,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from app.core.enums import CompanyScale, CreditRating, SpGrade
 from app.db.models.company import Company, CompanyProfile, CompanyProject
 
-# --------------------------------------------------------------------------- #
-# Company
-# --------------------------------------------------------------------------- #
-
-
 class CompanyUpdate(BaseModel):
-    """부분 수정. 보낸 필드만 반영된다."""
 
     name: str | None = Field(default=None, max_length=200, description="회사명")
     contact_name: str | None = Field(
@@ -38,13 +26,6 @@ class CompanyRead(BaseModel):
     @classmethod
     def of(cls, company: Company) -> "CompanyRead":
         return cls.model_validate(company)
-
-
-# --------------------------------------------------------------------------- #
-# CompanyProfile (회사 1건당 1개)
-# --------------------------------------------------------------------------- #
-
-
 class CompanyProfileCreate(BaseModel):
     company_scale: CompanyScale | None = Field(
         default=None, description="기업규모 (대/중견/중소)", examples=[CompanyScale.SMALL]
@@ -100,11 +81,6 @@ class CompanyProfileRead(BaseModel):
         return cls.model_validate(profile).model_copy(
             update={"embedded": profile.embedding is not None}
         )
-
-
-# --------------------------------------------------------------------------- #
-# CompanyProject (회사 1건당 N개)
-# --------------------------------------------------------------------------- #
 
 
 class CompanyProjectCreate(BaseModel):

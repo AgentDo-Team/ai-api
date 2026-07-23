@@ -1,16 +1,3 @@
-"""DB 스키마 초기화 스크립트.
-
-실행 순서:
-  1. 확장 생성: vector(pgvector) + pg_search(BM25)
-  2. SQLModel 메타데이터 기반 전체 테이블 생성 (create_all)
-  3. 기존 테이블에 추가된 컬럼 반영 (create_all 은 기존 테이블을 변경하지 않는다)
-  4. 벡터 컬럼(HNSW, cosine) 인덱스 생성
-  5. BM25 렉시컬 인덱스 생성 (chunks.content, 한국어 형태소 분석기)
-
-사용법:
-  uv run python -m app.db.init_db
-"""
-
 import asyncio
 
 from sqlalchemy import text
@@ -20,16 +7,12 @@ from sqlmodel import SQLModel
 import app.db.models  # noqa: F401
 from app.db.session import engine
 
-# 기존 테이블에 나중에 추가된 컬럼. create_all 은 이미 있는 테이블을 건드리지 않으므로
-# (이 프로젝트에는 마이그레이션 도구가 없다) 여기서 멱등 ALTER 로 채워준다.
 COLUMN_MIGRATIONS = (
     "ALTER TABLE search_sets ADD COLUMN IF NOT EXISTS progress_current INTEGER",
     "ALTER TABLE search_sets ADD COLUMN IF NOT EXISTS progress_total INTEGER",
-    # 협업 제안 메일 수신자 주소 (app/agents/collaboration_email 서브그래프에서 사용)
     "ALTER TABLE partners ADD COLUMN IF NOT EXISTS email VARCHAR(255)",
 )
 
-# NULL=미임베딩 벡터 컬럼에 대한 HNSW(cosine) 인덱스
 VECTOR_INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_chunks_embedding "
     "ON chunks USING hnsw (embedding vector_cosine_ops)",
@@ -41,17 +24,12 @@ VECTOR_INDEXES = (
     "ON eval_criteria_references USING hnsw (embedding vector_cosine_ops)",
 )
 
-# BM25 렉시컬 인덱스 (pg_search). content 를 한국어 형태소 분석기(korean_lindera)로
-# 색인하고, bid_notice_id 를 함께 색인해 공고 필터가 인덱스에 푸시다운되도록 한다
-# (2차 소프트필터의 배치 BM25 검색이 이 인덱스를 쓴다). dense(HNSW)와 함께 하이브리드 구성.
 LEXICAL_INDEXES = (
     """CREATE INDEX IF NOT EXISTS idx_chunks_bm25 ON chunks
        USING bm25 (id, content, bid_notice_id)
        WITH (key_field='id', text_fields='{"content":{"tokenizer":{"type":"korean_lindera"}}}')""",
 )
 
-# create_all 은 기존 테이블에 새 컬럼을 추가하지 않으므로 호환 가능한 스키마 보강은
-# 명시적으로 적용한다. 별도 마이그레이션 도구 도입 전까지 사용하는 최소 변경 목록이다.
 SCHEMA_UPGRADES = (
     "ALTER TABLE search_sets ADD COLUMN IF NOT EXISTS failure_reason TEXT",
 )
@@ -59,24 +37,17 @@ SCHEMA_UPGRADES = (
 
 async def init_db() -> None:
     async with engine.begin() as conn:
-        # 1. 확장 생성 (vector 타입 / bm25 인덱스 사용 전 반드시 필요)
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_search"))
 
-        # 2. 전체 테이블 생성
         await conn.run_sync(SQLModel.metadata.create_all)
 
         for stmt in SCHEMA_UPGRADES:
             await conn.execute(text(stmt))
-        # 3. 기존 테이블에 추가된 컬럼 반영
         for stmt in COLUMN_MIGRATIONS:
             await conn.execute(text(stmt))
-
-        # 4. 벡터(HNSW) 인덱스 생성
         for stmt in VECTOR_INDEXES:
             await conn.execute(text(stmt))
-
-        # 5. BM25 렉시컬 인덱스 생성
         for stmt in LEXICAL_INDEXES:
             await conn.execute(text(stmt))
 
