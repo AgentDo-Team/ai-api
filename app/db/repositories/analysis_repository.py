@@ -16,8 +16,13 @@ class AnalysisResultRepository:
         await self.session.flush()
         return analysis_result
     
-    async def get(self, analysis_result_id: int) -> AnalysisResult | None:
-        return await self.session.get(AnalysisResult, analysis_result_id)
+    async def get_by_bid_notice_id(self, bid_notice_id: int) -> AnalysisResult | None:
+        result = await self.session.exec(
+            select(AnalysisResult).where(
+                AnalysisResult.bid_notice_id == bid_notice_id,
+            )
+        )
+        return result.first()
 
     async def list_by_search_set(
         self, search_set_id: int, limit: int = 5

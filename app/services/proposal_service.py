@@ -4,6 +4,7 @@ from docx import Document
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 import time
 from app.db.models.analysis import AnalysisResult
@@ -46,6 +47,10 @@ class ProposalService:
         tools = [get_company_profile, get_company_projects, get_bid_notice]
         
         llm = ChatOllama(model="qwen3:8b", temperature=0).bind_tools(tools)
+        # llm = ChatOpenAI(
+        #     model="gpt-4o-mini", 
+        #     temperature=0,
+        # ).bind_tools(tools)
 
         parser = JsonOutputParser(
             pydantic_object=ProposalDraftData
@@ -59,6 +64,11 @@ class ProposalService:
             - search_set_id: {analysis_result.search_set_id}
             - bid_notice_id: {analysis_result.bid_notice_id}
             - 분석 결과: {analysis_json_str}
+            
+            [매우 중요/엄격한 규칙]
+            1. 최종 결과물은 반드시 완벽한 JSON 포맷(객체)으로만 출력하세요.
+            2. JSON 외에 "네, 알겠습니다", "여기 있습니다" 같은 인사말이나 부가 설명을 절대 포함하지 마세요.
+            3. 마크다운 블록(```json ... ```)도 쓰지 말고 오직 순수한 JSON 중괄호 {{ }} 만 출력하세요.
             필요한 정보가 모두 수집되면 즉시 ProposalDraftData JSON을 생성하세요.
             필요한 정보가 부족하면 적절한 Tool을 호출하고, 같은 Tool을 두 번 이상 호출하지 않습니다.
             충분한 정보가 모이면 최종 응답은 반드시 아래 JSON 형식을 따라야 합니다.
@@ -76,7 +86,7 @@ class ProposalService:
             for tool in tools
         }
 
-        max_iterations = 2
+        max_iterations = 5
         final_response = None
 
         for i in range(max_iterations):
@@ -128,6 +138,8 @@ class ProposalService:
                     )
 
                 except Exception as e:
+                    error_msg = f"Tool Error ({tool_name}): {str(e)}"
+                    print(f"🚨 [디버그] {error_msg}")
                     messages.append(
                         ToolMessage(
                             content=f"Tool Error: {str(e)}",
@@ -227,10 +239,15 @@ class ProposalService:
             print(f"[Error] DB 저장 실패: {e}")
             raise e
         
-    async def process_proposal_generation(self, analysis_result_id: int, company_id:int) -> dict:
-        analysis_result = await self.analysis_repo.get(analysis_result_id)
+    async def process_proposal_generation(self, bid_notice_id: int, company_id:int) -> dict:
+        """
+        [통합 파이프라인]
+        1. DB 조회 -> 2. LLM 초안 생성 -> 3. DOCX 파일 생성 -> 4. 결과 DB 저장
+        """
+        # 1. 분석 결과 조회
+        analysis_result = await self.analysis_repo.get_by_bid_notice_id(bid_notice_id)
         if not analysis_result:
-            raise ValueError(f"AnalysisResult {analysis_result_id} not found.")
+            raise ValueError(f"AnalysisResult {bid_notice_id} not found.")
 
         print("[Service] 1. LLM 제안서 초안(JSON) 생성 시작...")
         draft_data = await self.generate_draft(analysis_result)
@@ -240,7 +257,7 @@ class ProposalService:
 
         print("[Service] 2. DOCX 파일 생성 시작...")
         file_name = await self.save_docx(
-            bid_notice_id=analysis_result.bid_notice_id, 
+            bid_notice_id=bid_notice_id, 
             draft_data=draft_data
         )
 
@@ -277,9 +294,7 @@ class ProposalService:
     async def get_proposals(self, company_id: int = None, search_set_id: int = None, bid_notice_id: int = None):
         
         proposals = await self.repo.get_list(
-            company_id=company_id,
-            search_set_id=search_set_id,
-            bid_notice_id=bid_notice_id
+            company_id=company_id
         )
         
         return [
